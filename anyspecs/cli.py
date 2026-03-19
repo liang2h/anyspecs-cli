@@ -7,10 +7,12 @@ import sys
 import pathlib
 import datetime
 import os
+import json
 from typing import Dict, Any, List, Optional
 
 from .utils.logging import setup_logging
 from .utils.paths import get_project_name
+from .config import config
 from .exporters.cursor import CursorExtractor
 from .exporters.claude import ClaudeExtractor
 from .exporters.kiro import KiroExtractor
@@ -95,10 +97,12 @@ Examples:
   %(prog)s compress --provider kimi               # Override with specific provider
   %(prog)s compress --api-key YOUR_KEY --model gpt-4  # Override with command line options
   %(prog)s compress --input .anyspecs --output .compressed  # Specify input/output directories
-  # Upload (token from env: export ANYSPECS_TOKEN=YOUR_TOKEN)
-  %(prog)s upload --list                             # List files on hub
-  %(prog)s upload --file path/to/file [--description "desc"] # Upload to anyspecs hub.
-  %(prog)s upload --url http://your-server:3000 --file path/to/file # Specify your server
+  # Upload to AnySpecs hub
+  %(prog)s upload --hub-type anyspecs --list
+  %(prog)s upload --hub-type anyspecs --file path/to/file [--description "desc"]
+  # Upload exported files to OSS mode
+  %(prog)s upload --hub-type oss --dir
+  %(prog)s upload --hub-type oss --file .anyspecs/chat.md
 
 Note: After first-time setup, API keys and models are auto-saved to .env file and config.
       Subsequent runs will automatically load these settings unless overridden.
@@ -180,12 +184,22 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         
         # upload command
         upload_parser = subparsers.add_parser('upload', help='Upload files to AnySpecs hub service')
-        upload_parser.add_argument('--url', default='https://hub.anyspecs.cn/',
-                                   help='API base URL (default: https://hub.anyspecs.cn/)')
-        upload_parser.add_argument('--file', help='File path to upload')
+        upload_parser.add_argument('--hub-type',
+                                   choices=['anyspecs', 'oss'],
+                                   default='anyspecs',
+                                   help='Upload backend type (default: anyspecs)')
+        upload_parser.add_argument('--url',
+                                   help='Hub API base URL for hub-type=anyspecs')
+        operation_group = upload_parser.add_mutually_exclusive_group()
+        operation_group.add_argument('--file', type=pathlib.Path, help='File path to upload')
+        operation_group.add_argument('--dir',
+                                     nargs='?',
+                                     const='.anyspecs',
+                                     type=pathlib.Path,
+                                     help='Directory to upload recursively (default: .anyspecs/)')
         upload_parser.add_argument('--description', default='', help='File description')
-        upload_parser.add_argument('--list', action='store_true', help='List files')
-        upload_parser.add_argument('--search', help='Search file keyword')
+        operation_group.add_argument('--list', action='store_true', help='List files on AnySpecs hub')
+        operation_group.add_argument('--search', help='Search file keyword on AnySpecs hub')
         upload_parser.add_argument('--page', type=int, default=0, help='Page number (starting from 0)')
         upload_parser.add_argument('--http', action='store_true', help='Force use HTTP instead of HTTPS for testing')
         upload_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
@@ -433,9 +447,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             output_path = output_path.with_suffix(formatter.get_file_extension())
         
         try:
-            content = formatter.format(chat)
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            self._write_export_artifacts(chat, formatter, output_path)
             
             print(f"✅ Export successful: {output_path}")
             print(f"📄 File size: {output_path.stat().st_size} bytes")
@@ -463,19 +475,8 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             session_id = chat.get('session_id', '')[:8] or f'chat{i:03d}'
             project_name = chat.get('project', {}).get('name', 'unknown').replace(' ', '_')
             source = chat.get('source', 'unknown')
-            
-            # Add timestamp to differentiate files
-            timestamp = ""
-            if chat.get('date'):
-                try:
-                    date_obj = datetime.datetime.fromtimestamp(chat['date'])
-                    timestamp = date_obj.strftime("-%Y%m%d-%H%M%S")
-                except:
-                    timestamp = f"-{int(chat['date'])}"
-            else:
-                timestamp = f"-{i:03d}"
-            
-            filename = f"{source}-chat-{project_name}-{session_id}{timestamp}"
+
+            filename = f"{source}-chat-{project_name}-{session_id}"
             output_path = output_base / filename
             
             # Add extension if needed
@@ -483,9 +484,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
                 output_path = output_path.with_suffix(formatter.get_file_extension())
             
             try:
-                content = formatter.format(chat)
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
+                self._write_export_artifacts(chat, formatter, output_path)
                 print(f"✅ {i}/{len(chats)}: {output_path.name}")
                 success_count += 1
             except Exception as e:
@@ -494,37 +493,188 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         print(f"\n🎉 Batch export completed! {success_count}/{len(chats)} files exported to: {output_base}")
         
         return 0 if success_count > 0 else 1
-    
 
     def _upload_command(self, args) -> int:
-        """Execute the upload command (token read from ANYSPECS_TOKEN)."""
-        token = os.environ.get('ANYSPECS_TOKEN')
-        client = AnySpecsUploadClient(args.url, token, args.http)
+        """Execute the upload command."""
+        if args.hub_type == 'oss':
+            return self._upload_to_oss(args)
+        return self._upload_to_anyspecs(args)
+
+    def _upload_to_anyspecs(self, args) -> int:
+        """Upload to AnySpecs hub."""
+        if not any([args.file, args.dir, args.list, args.search]):
+            print("❌ No upload operation specified")
+            print("💡 Use one of: --file, --dir, --list, --search")
+            return 1
+
+        base_url = (
+            args.url
+            or os.environ.get('ANYSPECS_UPLOAD_URL')
+            or config.get('upload.anyspecs.server_url')
+            or AnySpecsUploadClient.DEFAULT_BASE_URL
+        )
+        token = (
+            os.environ.get('ANYSPECS_TOKEN')
+            or config.get('upload.anyspecs.token')
+        )
+        client = AnySpecsUploadClient(base_url, token, args.http)
 
         if not token:
-            print("⚠️  No ANYSPECS_TOKEN environment variable found")
+            print("⚠️  No ANYSPECS_TOKEN configured for hub-type=anyspecs")
             print("💡  Please set: export ANYSPECS_TOKEN=YOUR_TOKEN")
-            print("💡  Or use interactive mode to enter token manually")
-            # Fall back to interactive mode
-            client.interactive_mode()
-            return 0
+            return 1
 
-        # Validate token first
         if not client.validate_token():
             return 1
 
-        # Dispatch operations
         if args.file:
             return 0 if client.upload_file(str(args.file), args.description) else 1
+        if args.dir:
+            summary = client.upload_directory_anyspecs(str(args.dir), args.description)
+            self._print_upload_summary(args.dir, summary)
+            return 0 if summary['success'] > 0 else 1
         if args.list:
             return 0 if client.list_files(args.page) else 1
         if args.search:
             return 0 if client.list_files(args.page, args.search) else 1
 
-        # If no specific op, just test connection and show help summary
-        client.test_connection()
-        print("Use one of: --file, --list, --search")
-        return 0
+        return 1
+
+    def _upload_to_oss(self, args) -> int:
+        """Upload exported files in OSS mode."""
+        if args.list or args.search:
+            print("❌ --list and --search are only supported for hub-type=anyspecs")
+            return 1
+
+        if not any([args.file, args.dir]):
+            print("❌ No upload operation specified")
+            print("💡 Use one of: --file or --dir")
+            return 1
+
+        username = (
+            os.environ.get('ANYSPECS_UPLOAD_USERNAME')
+            or config.get('upload.oss.username')
+        )
+        if not username:
+            print("❌ No ANYSPECS_UPLOAD_USERNAME configured for hub-type=oss")
+            print("💡 Please set: export ANYSPECS_UPLOAD_USERNAME=YOUR_USERNAME")
+            return 1
+
+        oss_config = self._resolve_oss_config()
+        missing = [
+            label for key, label in [
+                ('bucket', 'OSS_BUCKET'),
+                ('access_key_id', 'OSS_ACCESS_KEY_ID'),
+                ('access_key_secret', 'OSS_ACCESS_KEY_SECRET'),
+            ]
+            if not oss_config.get(key)
+        ]
+        if not (oss_config.get('endpoint') or oss_config.get('region')):
+            missing.append('OSS_ENDPOINT or OSS_REGION')
+        if missing:
+            print("❌ Missing OSS configuration for hub-type=oss")
+            print(f"💡 Required: {', '.join(missing)}")
+            return 1
+
+        client = AnySpecsUploadClient()
+
+        if args.file:
+            return 0 if client.upload_exported_file(
+                str(args.file),
+                description=args.description,
+                username=username,
+                oss_config=oss_config,
+            ) else 1
+
+        summary = client.upload_directory_oss(
+            str(args.dir),
+            description=args.description,
+            username=username,
+            oss_config=oss_config,
+        )
+        self._print_upload_summary(args.dir, summary)
+        return 0 if summary['success'] > 0 else 1
+
+    def _resolve_oss_config(self) -> Dict[str, Optional[str]]:
+        """Resolve OSS SDK configuration from environment or config."""
+        return {
+            'bucket': (
+                os.environ.get('OSS_BUCKET')
+                or config.get('upload.oss.bucket')
+            ),
+            'endpoint': (
+                os.environ.get('OSS_ENDPOINT')
+                or config.get('upload.oss.endpoint')
+            ),
+            'region': (
+                os.environ.get('OSS_REGION')
+                or config.get('upload.oss.region')
+            ),
+            'access_key_id': (
+                os.environ.get('OSS_ACCESS_KEY_ID')
+                or config.get('upload.oss.access_key_id')
+            ),
+            'access_key_secret': (
+                os.environ.get('OSS_ACCESS_KEY_SECRET')
+                or config.get('upload.oss.access_key_secret')
+            ),
+            'public_base_url': (
+                os.environ.get('OSS_PUBLIC_BASE_URL')
+                or config.get('upload.oss.public_base_url')
+            ),
+        }
+
+    def _print_upload_summary(self, path: pathlib.Path, summary: Dict[str, int]) -> None:
+        """Print a directory upload summary."""
+        print(f"\n📦 Directory upload completed: {path}")
+        print(
+            f"   Success: {summary.get('success', 0)} | "
+            f"Failed: {summary.get('failed', 0)} | "
+            f"Skipped: {summary.get('skipped', 0)}"
+        )
+
+    def _write_export_artifacts(self, chat: Dict[str, Any], formatter, output_path: pathlib.Path) -> None:
+        """Write export content and metadata sidecar."""
+        content = formatter.format(chat)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        metadata = self._build_export_metadata(chat, formatter, output_path)
+        metadata_path = AnySpecsUploadClient.get_export_metadata_path(output_path)
+        with open(metadata_path, 'w', encoding='utf-8') as meta_file:
+            json.dump(metadata, meta_file, indent=2, ensure_ascii=False)
+
+    def _build_export_metadata(
+        self,
+        chat: Dict[str, Any],
+        formatter,
+        output_path: pathlib.Path,
+    ) -> Dict[str, Any]:
+        """Build metadata used by structured export uploads."""
+        project = chat.get('project', {}) if isinstance(chat.get('project'), dict) else {}
+        source = chat.get('source', 'unknown')
+        session_id = chat.get('session_id', 'unknown')
+        format_name = getattr(formatter, 'name', 'unknown')
+        timestamp = chat.get('date')
+
+        if isinstance(timestamp, (int, float)):
+            chat_date = datetime.datetime.fromtimestamp(
+                timestamp,
+                datetime.timezone.utc,
+            ).strftime("%Y/%m/%d")
+        else:
+            chat_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y/%m/%d")
+
+        return {
+            'source': source,
+            'session_id': session_id,
+            'project_name': project.get('name', 'unknown'),
+            'project_root': project.get('rootPath', ''),
+            'format': format_name,
+            'chat_date': chat_date,
+            'exported_filename': output_path.name,
+            'dedupe_key': f"{source}:{session_id}:{format_name}",
+        }
 
     def _compress_command(self, args) -> int:
         """Execute the compress command."""

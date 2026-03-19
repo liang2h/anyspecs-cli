@@ -4,17 +4,22 @@ Reusable upload client for AnySpecs CLI.
 
 from __future__ import annotations
 
+import json
+import mimetypes
 import requests
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 
 class AnySpecsUploadClient:
     """AnySpecs file upload client"""
 
+    DEFAULT_BASE_URL = "https://hub.anyspecs.cn/"
+
     def __init__(
         self,
-        base_url: str = "https://hub.anyspecs.cn/",
+        base_url: str = DEFAULT_BASE_URL,
         token: Optional[str] = None,
         use_http: bool = False,
     ):
@@ -112,26 +117,24 @@ class AnySpecsUploadClient:
         if not self.token:
             print("❌ Access token not set")
             return False
-        p = Path(file_path)
-        if not p.exists():
-            print(f"❌ File does not exist: {p}")
-            return False
-        if not p.is_file():
-            print(f"❌ Not a valid file: {p}")
+        p = self._validate_local_file(file_path)
+        if p is None:
             return False
         size = p.stat().st_size
-        if size == 0:
-            print(f"❌ File is empty: {p}")
-            return False
 
         print(f"📁 Preparing to upload file: {p.name}")
         print(f"   Size: {self._format_file_size(size)}")
         print(f"   Description: {description or 'No description'}")
 
         try:
-            files = {"file": (p.name, open(p, "rb"), "application/octet-stream")}
             data = {"description": description} if description else {}
-            resp = self.session.post(f"{self.base_url}/api/file/", files=files, data=data)
+            with p.open("rb") as file_handle:
+                files = {"file": (p.name, file_handle, "application/octet-stream")}
+                resp = self.session.post(
+                    f"{self.base_url}/api/file/",
+                    files=files,
+                    data=data,
+                )
             if resp.status_code == 200:
                 result = resp.json()
                 if result.get("success"):
@@ -153,6 +156,215 @@ class AnySpecsUploadClient:
         except Exception as e:
             print(f"❌ Upload process error: {e}")
             return False
+
+    def upload_exported_file(
+        self,
+        file_path: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        description: str = "",
+        username: str = "",
+        oss_config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        p = self._validate_local_file(file_path)
+        if p is None:
+            return False
+
+        if not username:
+            print("❌ OSS username is required")
+            return False
+
+        metadata = metadata or self.load_export_metadata(str(p))
+        if not metadata:
+            print(f"❌ Missing export metadata sidecar for: {p}")
+            return False
+
+        size = p.stat().st_size
+        print(f"📁 Preparing to upload export file: {p.name}")
+        print(f"   Size: {self._format_file_size(size)}")
+        print(f"   Description: {description or 'No description'}")
+        print(f"   OSS Username: {username}")
+
+        try:
+            bucket = self._create_oss_bucket(oss_config or {})
+            object_key = self._build_oss_object_key(p, metadata, username)
+            headers = self._build_oss_headers(metadata, description, p)
+            bucket.put_object_from_file(object_key, str(p), headers=headers)
+            print("✅ Export file upload successful!")
+            print(f"   OSS Path: {bucket.bucket_name}/{object_key}")
+            return True
+        except Exception as e:
+            print(f"❌ Upload process error: {e}")
+            return False
+
+    def upload_directory_anyspecs(
+        self,
+        directory: str,
+        description: str = "",
+    ) -> Dict[str, int]:
+        files = self.iter_files(directory)
+        summary = {"success": 0, "failed": 0, "skipped": 0}
+        for path in files:
+            if self.upload_file(str(path), description):
+                summary["success"] += 1
+            else:
+                summary["failed"] += 1
+        return summary
+
+    def upload_directory_oss(
+        self,
+        directory: str,
+        description: str = "",
+        username: str = "",
+        oss_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, int]:
+        files = self.iter_files(directory)
+        summary = {"success": 0, "failed": 0, "skipped": 0}
+
+        for path in files:
+            if path.name.endswith(".meta.json"):
+                summary["skipped"] += 1
+                continue
+
+            metadata = self.load_export_metadata(str(path))
+            if not metadata:
+                summary["skipped"] += 1
+                continue
+
+            if self.upload_exported_file(
+                str(path),
+                metadata=metadata,
+                description=description,
+                username=username,
+                oss_config=oss_config,
+            ):
+                summary["success"] += 1
+            else:
+                summary["failed"] += 1
+
+        return summary
+
+    def iter_files(self, directory: str) -> List[Path]:
+        root = Path(directory)
+        if not root.exists():
+            print(f"❌ Directory does not exist: {root}")
+            return []
+        if not root.is_dir():
+            print(f"❌ Not a valid directory: {root}")
+            return []
+
+        files = [path for path in root.rglob("*") if path.is_file()]
+        return sorted(files, key=lambda path: str(path.relative_to(root)))
+
+    @staticmethod
+    def load_export_metadata(file_path: str) -> Optional[Dict[str, Any]]:
+        path = Path(file_path)
+        meta_path = AnySpecsUploadClient.get_export_metadata_path(path)
+        if not meta_path.exists() or not meta_path.is_file():
+            return None
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as meta_file:
+                data = json.load(meta_file)
+        except Exception:
+            return None
+
+        if not isinstance(data, dict):
+            return None
+        return data
+
+    @staticmethod
+    def get_export_metadata_path(file_path: Path) -> Path:
+        return file_path.parent / f"{file_path.name}.meta.json"
+
+    @staticmethod
+    def _build_oss_headers(
+        metadata: Dict[str, Any],
+        description: str,
+        file_path: Path,
+    ) -> Dict[str, str]:
+        headers = {
+            "x-oss-meta-source": str(metadata.get("source", "")),
+            "x-oss-meta-session-id": str(metadata.get("session_id", "")),
+            "x-oss-meta-format": str(metadata.get("format", "")),
+            "x-oss-meta-chat-date": str(metadata.get("chat_date", "")),
+            "x-oss-meta-dedupe-key": str(metadata.get("dedupe_key", "")),
+        }
+        if description:
+            headers["x-oss-meta-description"] = description
+
+        content_type, _ = mimetypes.guess_type(file_path.name)
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
+
+    @staticmethod
+    def _build_oss_object_key(
+        file_path: Path,
+        metadata: Dict[str, Any],
+        username: str,
+    ) -> str:
+        chat_date = str(metadata.get("chat_date", "")).strip("/")
+        if chat_date:
+            date_part = chat_date
+        else:
+            date_part = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+        return f"{username}/{date_part}/{file_path.name}"
+
+    @staticmethod
+    def _create_oss_bucket(oss_config: Dict[str, Any]):
+        try:
+            import oss2
+        except ImportError as exc:
+            raise RuntimeError(
+                "oss2 is not installed. Please install AnySpecs with OSS support."
+            ) from exc
+
+        bucket_name = str(oss_config.get("bucket") or "").strip()
+        access_key_id = str(oss_config.get("access_key_id") or "").strip()
+        access_key_secret = str(oss_config.get("access_key_secret") or "").strip()
+        endpoint = AnySpecsUploadClient._normalize_oss_endpoint(
+            str(oss_config.get("endpoint") or "").strip(),
+            str(oss_config.get("region") or "").strip(),
+        )
+
+        missing = []
+        if not bucket_name:
+            missing.append("OSS_BUCKET")
+        if not access_key_id:
+            missing.append("OSS_ACCESS_KEY_ID")
+        if not access_key_secret:
+            missing.append("OSS_ACCESS_KEY_SECRET")
+        if not endpoint:
+            missing.append("OSS_ENDPOINT or OSS_REGION")
+        if missing:
+            raise RuntimeError(f"Missing OSS configuration: {', '.join(missing)}")
+
+        auth = oss2.Auth(access_key_id, access_key_secret)
+        return oss2.Bucket(auth, endpoint, bucket_name)
+
+    @staticmethod
+    def _normalize_oss_endpoint(endpoint: str, region: str) -> str:
+        if endpoint:
+            if endpoint.startswith("http://") or endpoint.startswith("https://"):
+                return endpoint
+            return f"https://{endpoint}"
+        if region:
+            return f"https://oss-{region}.aliyuncs.com"
+        return ""
+
+    @staticmethod
+    def _validate_local_file(file_path: str) -> Optional[Path]:
+        p = Path(file_path)
+        if not p.exists():
+            print(f"❌ File does not exist: {p}")
+            return None
+        if not p.is_file():
+            print(f"❌ Not a valid file: {p}")
+            return None
+        if p.stat().st_size == 0:
+            print(f"❌ File is empty: {p}")
+            return None
+        return p
 
     def list_files(self, page: int = 0, search: str = "") -> bool:
         if not self.token:
@@ -211,5 +423,3 @@ class AnySpecsUploadClient:
             size /= 1024.0
             i += 1
         return f"{size:.1f} {size_names[i]}"
-
-

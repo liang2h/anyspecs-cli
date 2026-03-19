@@ -33,6 +33,7 @@ dependencies = [
     "requests>=2.25.0",
     "python-dateutil>=2.8.0",
     "pathlib2>=2.3.0",
+    "oss2>=2.19.1",
 ]
 
 [project.optional-dependencies]
