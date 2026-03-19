@@ -297,3 +297,80 @@ def test_keeps_config_and_log_as_synthetic_sessions(tmp_path, monkeypatch):
     assert synthetic["log"]["project"]["name"] == "demo-app"
     assert "Project configuration" in synthetic["config"]["messages"][0]["content"]
     assert "Log entries related to project" in synthetic["log"]["messages"][0]["content"]
+
+
+def test_reports_supported_and_unsupported_codex_versions(tmp_path, monkeypatch):
+    history_dir = tmp_path / ".codex"
+    project_dir = tmp_path / "workspace" / "demo-app"
+    supported_session = (
+        history_dir
+        / "sessions"
+        / "2026"
+        / "03"
+        / "11"
+        / "rollout-2026-03-11T14-13-30-019cdb87-686a-7253-b2f3-ef7ec0c4122b.jsonl"
+    )
+    unsupported_session = (
+        history_dir
+        / "sessions"
+        / "2026"
+        / "03"
+        / "21"
+        / "rollout-2026-03-21T14-13-30-019cdb87-686a-7253-b2f3-ef7ec0c4999.jsonl"
+    )
+
+    write_jsonl(
+        supported_session,
+        [
+            {
+                "timestamp": "2026-03-11T06:13:30.350Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "019cdb87-686a-7253-b2f3-ef7ec0c4122b",
+                    "timestamp": "2026-03-11T06:13:30.350Z",
+                    "cwd": str(project_dir),
+                    "cli_version": "0.114.0",
+                },
+            }
+        ],
+    )
+    write_jsonl(
+        unsupported_session,
+        [
+            {
+                "timestamp": "2026-03-21T06:13:30.350Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "019cdb87-686a-7253-b2f3-ef7ec0c4999",
+                    "timestamp": "2026-03-21T06:13:30.350Z",
+                    "cwd": str(project_dir),
+                    "cli_version": "0.115.0-alpha.28",
+                },
+            }
+        ],
+    )
+
+    extractor = make_extractor(history_dir, project_dir, monkeypatch)
+    info = extractor.get_version_support_info()
+
+    assert info["has_sessions"] is True
+    assert info["supported_versions"] == [
+        "0.106.0",
+        "0.111.0",
+        "0.114.0",
+        "0.115.0-alpha.27",
+    ]
+    assert info["detected_versions"] == ["0.114.0", "0.115.0-alpha.28"]
+    assert info["unsupported_versions"] == ["0.115.0-alpha.28"]
+
+
+def test_reports_no_codex_version_info_when_no_sessions_exist(tmp_path, monkeypatch):
+    history_dir = tmp_path / ".codex"
+    project_dir = tmp_path / "workspace" / "demo-app"
+
+    extractor = make_extractor(history_dir, project_dir, monkeypatch)
+    info = extractor.get_version_support_info()
+
+    assert info["has_sessions"] is False
+    assert info["detected_versions"] == []
+    assert info["unsupported_versions"] == []

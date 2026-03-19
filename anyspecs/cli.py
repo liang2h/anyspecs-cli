@@ -210,6 +210,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # Collect sessions from all requested sources
         all_sessions = []
         sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        self._print_codex_version_notice(sources_to_check)
         
         for source in sources_to_check:
             extractor = self.extractors[source]
@@ -263,6 +264,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # Collect chats from all requested sources
         all_chats = []
         sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        self._print_codex_version_notice(sources_to_check)
         
         for source in sources_to_check:
             extractor = self.extractors[source]
@@ -297,6 +299,46 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             return self._export_single_chat(filtered_chats[0], formatter, args)
         else:
             return self._export_multiple_chats(filtered_chats, formatter, args)
+
+    def _print_codex_version_notice(self, sources_to_check: List[str]) -> None:
+        """Print supported and detected Codex versions when Codex is involved."""
+        if 'codex' not in sources_to_check:
+            return
+
+        extractor = self.extractors.get('codex')
+        if not extractor or not hasattr(extractor, 'get_version_support_info'):
+            return
+
+        try:
+            info = extractor.get_version_support_info()
+        except Exception as e:
+            self.logger.warning(f"Error checking Codex version support: {e}")
+            return
+
+        supported_versions = info.get('supported_versions', [])
+        detected_versions = info.get('detected_versions', [])
+        unsupported_versions = info.get('unsupported_versions', [])
+        has_sessions = info.get('has_sessions', False)
+
+        supported_text = ", ".join(supported_versions) if supported_versions else "Unknown"
+        print(f"ℹ️ Codex 已验证支持版本: {supported_text}")
+
+        if detected_versions:
+            detected_text = ", ".join(detected_versions)
+            print(f"ℹ️ 本机检测到的 Codex 版本: {detected_text}")
+        elif has_sessions:
+            print("ℹ️ 检测到了 Codex session 文件，但未读取到 cli_version 信息")
+        else:
+            print("ℹ️ 未检测到 Codex session 版本信息")
+
+        if unsupported_versions:
+            unsupported_text = ", ".join(unsupported_versions)
+            print(
+                "⚠️ 检测到未验证的 Codex 版本: "
+                f"{unsupported_text}，可能无法完整解析会话内容，但仍会继续尝试。"
+            )
+
+        print()
     
     def _apply_filters(self, chats: List[Dict[str, Any]], args) -> List[Dict[str, Any]]:
         """Apply filters to the chat list."""

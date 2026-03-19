@@ -15,6 +15,13 @@ from ..utils.paths import extract_project_name_from_path
 class CodexExtractor(BaseExtractor):
     """Extractor for Codex chat history."""
 
+    SUPPORTED_CLI_VERSIONS = (
+        "0.106.0",
+        "0.111.0",
+        "0.114.0",
+        "0.115.0-alpha.27",
+    )
+
     def __init__(self):
         super().__init__("codex")
         self.history_dir = pathlib.Path.home() / ".codex"
@@ -83,6 +90,39 @@ class CodexExtractor(BaseExtractor):
             )
 
         return sessions
+
+    def get_version_support_info(self) -> Dict[str, Any]:
+        """Inspect local Codex session files and summarize version support."""
+        sessions_dir = self.history_dir / "sessions"
+        detected_versions = set()
+        has_sessions = False
+
+        if sessions_dir.exists():
+            for session_file in sessions_dir.rglob("*.jsonl"):
+                has_sessions = True
+                version = self._read_cli_version_from_session_file(session_file)
+                if version:
+                    detected_versions.add(version)
+
+        supported_versions = sorted(
+            self.SUPPORTED_CLI_VERSIONS,
+            key=self._version_sort_key,
+        )
+        detected_versions_sorted = sorted(
+            detected_versions,
+            key=self._version_sort_key,
+        )
+        unsupported_versions = sorted(
+            [version for version in detected_versions_sorted if version not in supported_versions],
+            key=self._version_sort_key,
+        )
+
+        return {
+            "supported_versions": supported_versions,
+            "detected_versions": detected_versions_sorted,
+            "unsupported_versions": unsupported_versions,
+            "has_sessions": has_sessions,
+        }
 
     def _extract_from_session_files(
         self, session_titles: Dict[str, str]
@@ -324,6 +364,44 @@ class CodexExtractor(BaseExtractor):
             self.logger.warning(f"Error reading session_index.jsonl: {exc}")
 
         return titles
+
+    def _read_cli_version_from_session_file(
+        self, session_file: pathlib.Path
+    ) -> Optional[str]:
+        """Read cli_version from the session_meta record in a session file."""
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        self.logger.warning(
+                            "Invalid JSON in session file %s line %s: %s",
+                            session_file,
+                            line_num,
+                            exc,
+                        )
+                        return None
+
+                    if record.get("type") != "session_meta":
+                        continue
+
+                    payload = record.get("payload") or {}
+                    if isinstance(payload, dict):
+                        return payload.get("cli_version")
+                    return None
+        except Exception as exc:
+            self.logger.warning(
+                "Error reading Codex session version from %s: %s",
+                session_file,
+                exc,
+            )
+
+        return None
 
     def _create_session_template(
         self,
@@ -632,6 +710,14 @@ class CodexExtractor(BaseExtractor):
                 return None
 
         return None
+
+    def _version_sort_key(self, version: str) -> List[Any]:
+        """Sort versions naturally while keeping exact string comparison for support."""
+        return [
+            int(part) if part.isdigit() else part
+            for part in re.split(r"([0-9]+)", version)
+            if part
+        ]
 
     def _generate_preview(self, chat: Dict[str, Any]) -> str:
         """Generate a preview of the chat session."""
