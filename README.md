@@ -22,8 +22,9 @@ AnySpecs CLI is a unified command-line tool for exporting chat history from mult
 - **Project-Based and Workspace Filtering**: Export sessions by project or current directory
 - **Flexible Session Management**: List, filter, and export specific sessions
 - **Default Export Directory**: All exports save to `.anyspecs/` by default for organized storage
+- **Stable Export Files**: Export filenames use the full session ID and generate a `.meta.json` sidecar for later upload
 - **AI Summary**: Summarize chat history into a single file
-- **Server Upload and Share**: Upload exported files to remote servers
+- **Server Upload and Share**: Upload exported files to AnySpecs Hub or directly to Alibaba Cloud OSS
 - **Terminal history and files diff history**: Export terminal history and files diff history(WIP)
 
 ## Installation
@@ -74,6 +75,11 @@ anyspecs export [--session-id abc123] [--format json]
 
 # Export specific source sessions only(default is markdown) with custom output path
 anyspecs export [--source claude/cursor/kiro/augment/codex] [--format markdown] [--output ./exports]
+
+# Exported files are written to .anyspecs/ with full session IDs and a sidecar metadata file
+# Example:
+#   .anyspecs/codex-chat-anyspecs-cli-019d04f1-b713-7701-9c80-a9752539fa7f.md
+#   .anyspecs/codex-chat-anyspecs-cli-019d04f1-b713-7701-9c80-a9752539fa7f.md.meta.json
 ```
 
 ### Setup config
@@ -95,21 +101,72 @@ anyspecs compress [--input anyspecs.md] [--output anyspecs.specs] [--provider ai
 ```
 ### Upload to share your specs
 
-> The default url is our official hub https://hub.anyspecs.cn/, you can also deploy the [ASAP](https://github.com/anyspecs/ASAP) on your own server and use it.
+`upload` now supports two backends:
 
-Before your first upload, your should get your token on https://hub.anyspecs.cn/setting generate your token via `生成访问令牌`, then export your token into your environment variable. eg: `export ANYSPECS_TOKEN="44xxxxxxxxxxxxxx7a82"`.
+- `--hub-type anyspecs`: upload files to AnySpecs Hub / ASAP
+- `--hub-type oss`: upload exported chat files directly to Alibaba Cloud OSS
+
+#### Upload to AnySpecs Hub
+
+> The default hub url is `https://hub.anyspecs.cn/`, and you can also deploy [ASAP](https://github.com/anyspecs/ASAP) on your own server.
+
+Before your first hub upload, get your access token from `https://hub.anyspecs.cn/setting` and export it into your environment:
 
 ```bash
-# Default url is https://hub.anyspecs.cn/, you can also specify your server.
-# Check remote specs repo
-anyspecs upload --list
-# Search specific repo
-anyspecs upload --search "My specs"
-# Upload a file to remote server
-anyspecs upload --file anyspecs.specs
-# Upload a file to remote server with description
-anyspecs upload --file anyspecs.specs --description "My specs"
+export ANYSPECS_TOKEN="44xxxxxxxxxxxxxx7a82"
+# optional, defaults to https://hub.anyspecs.cn/
+export ANYSPECS_UPLOAD_URL="https://hub.anyspecs.cn/"
 ```
+
+```bash
+# Default hub url is https://hub.anyspecs.cn/, you can also specify your server.
+# Check remote specs repo
+anyspecs upload --hub-type anyspecs --list
+# Search specific repo
+anyspecs upload --hub-type anyspecs --search "My specs"
+# Upload a file to hub
+anyspecs upload --hub-type anyspecs --file anyspecs.specs
+# Upload a file to hub with description
+anyspecs upload --hub-type anyspecs --file anyspecs.specs --description "My specs"
+# Upload all files under a directory recursively
+anyspecs upload --hub-type anyspecs --dir .anyspecs
+# Use a custom server
+anyspecs upload --hub-type anyspecs --url http://your-server:3000 --file anyspecs.specs
+```
+
+#### Upload directly to Alibaba Cloud OSS
+
+OSS mode uploads exported files directly with the Alibaba Cloud `oss2` SDK. It does not use `--url` or `ANYSPECS_TOKEN`.
+
+Required environment variables:
+
+```bash
+export ANYSPECS_UPLOAD_USERNAME="your-name"
+export OSS_BUCKET="your-bucket"
+export OSS_ENDPOINT="oss-cn-hangzhou.aliyuncs.com"
+# or use OSS_REGION instead of OSS_ENDPOINT
+# export OSS_REGION="cn-hangzhou"
+export OSS_ACCESS_KEY_ID="your-ak"
+export OSS_ACCESS_KEY_SECRET="your-sk"
+```
+
+```bash
+# Upload one exported file
+anyspecs upload --hub-type oss --file .anyspecs/chat.md
+
+# Upload the default export directory recursively
+anyspecs upload --hub-type oss --dir
+
+# Upload a specific export directory recursively
+anyspecs upload --hub-type oss --dir ./exports
+```
+
+OSS upload rules:
+
+- Only exported files with a neighboring `.meta.json` sidecar are uploaded in `oss` mode
+- Object key format is `<username>/<YYYY>/<MM>/<DD>/<filename>`
+- Re-uploading the same exported file writes to the same OSS object key, so OSS overwrite behavior handles deduplication
+- Sidecar metadata is also written to OSS object metadata for traceability
 
 ### More Functions
 
@@ -173,6 +230,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Add Codex cli support
 - Add Dify workflow process
 - Add upload to remote server support
+- Add direct Alibaba Cloud OSS upload support
+- Add `upload --hub-type anyspecs|oss` and recursive directory upload
+- Add stable export filenames with full session IDs and `.meta.json` sidecars
 
 ### v0.0.4
 - Add Augment Code support

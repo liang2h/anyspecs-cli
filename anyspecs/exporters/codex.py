@@ -6,346 +6,733 @@ import json
 import pathlib
 import re
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..core.extractors import BaseExtractor
-from ..utils.paths import get_project_name
+from ..utils.paths import extract_project_name_from_path
 
 
 class CodexExtractor(BaseExtractor):
     """Extractor for Codex chat history."""
-    
+
+    SUPPORTED_CLI_VERSIONS = (
+        "0.106.0",
+        "0.111.0",
+        "0.114.0",
+        "0.115.0-alpha.27",
+    )
+
     def __init__(self):
-        super().__init__('codex')
+        super().__init__("codex")
         self.history_dir = pathlib.Path.home() / ".codex"
-    
+
     def extract_chats(self) -> List[Dict[str, Any]]:
         """Extract all chat data from Codex."""
         if not self.history_dir.exists():
             self.logger.debug(f"No Codex history found at: {self.history_dir}")
             return []
-        
-        # Get current project path for filtering
+
         current_project_path = str(pathlib.Path.cwd())
         self.logger.debug(f"Current project path: {current_project_path}")
-        
-        # Extract from multiple sources
-        all_sessions = {}
-        
-        # 1. Extract from history.jsonl (global history)
-        history_sessions = self._extract_from_history_jsonl(current_project_path)
-        all_sessions.update(history_sessions)
-        
-        # 2. Extract from session files (detailed conversations)
-        session_sessions = self._extract_from_session_files(current_project_path)
+
+        session_titles = self._load_session_titles()
+        all_sessions: Dict[str, Dict[str, Any]] = {}
+
+        session_sessions = self._extract_from_session_files(session_titles)
         all_sessions.update(session_sessions)
-        
-        # 3. Extract from log files (activity logs)
+
+        history_sessions = self._extract_from_history_jsonl(
+            existing_session_ids=set(session_sessions),
+            session_titles=session_titles,
+        )
+        all_sessions.update(history_sessions)
+
         log_sessions = self._extract_from_log_files(current_project_path)
         all_sessions.update(log_sessions)
-        
-        # 4. Extract from config (project settings)
+
         config_sessions = self._extract_from_config(current_project_path)
         all_sessions.update(config_sessions)
-        
-        # Convert sessions to list and filter out empty ones
-        chats = []
-        for session in all_sessions.values():
-            if session['messages']:
-                chats.append(session)
-        
+
+        chats = [session for session in all_sessions.values() if session["messages"]]
+        chats.sort(
+            key=lambda chat: chat["metadata"].get("last_updated") or 0,
+            reverse=True,
+        )
+
         self.logger.info(f"Extracted {len(chats)} Codex chat sessions")
         return chats
-    
+
     def list_sessions(self) -> List[Dict[str, Any]]:
         """List available Codex chat sessions with metadata."""
         chats = self.extract_chats()
         sessions = []
-        
+
         for chat in chats:
-            session = {
-                'session_id': chat['session_id'],
-                'project': chat['project']['name'],
-                'date': chat['metadata']['created_at'] or int(datetime.now().timestamp()),
-                'message_count': len(chat['messages']),
-                'source': 'codex',
-                'preview': self._generate_preview(chat)
-            }
-            sessions.append(session)
-        
+            created_at = chat["metadata"].get("created_at")
+            date_str = "Unknown date"
+            if created_at:
+                try:
+                    date_str = datetime.fromtimestamp(created_at).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                except Exception:
+                    pass
+
+            sessions.append(
+                {
+                    "session_id": chat["session_id"],
+                    "project": chat["project"]["name"],
+                    "date": date_str,
+                    "message_count": len(chat["messages"]),
+                    "source": "codex",
+                    "preview": self._generate_preview(chat),
+                }
+            )
+
         return sessions
-    
-    def _extract_from_history_jsonl(self, project_path: str) -> Dict[str, Dict[str, Any]]:
-        """Extract sessions from history.jsonl file."""
-        sessions = {}
+
+    def get_version_support_info(self) -> Dict[str, Any]:
+        """Inspect local Codex session files and summarize version support."""
+        sessions_dir = self.history_dir / "sessions"
+        detected_versions = set()
+        has_sessions = False
+
+        if sessions_dir.exists():
+            for session_file in sessions_dir.rglob("*.jsonl"):
+                has_sessions = True
+                version = self._read_cli_version_from_session_file(session_file)
+                if version:
+                    detected_versions.add(version)
+
+        supported_versions = sorted(
+            self.SUPPORTED_CLI_VERSIONS,
+            key=self._version_sort_key,
+        )
+        detected_versions_sorted = sorted(
+            detected_versions,
+            key=self._version_sort_key,
+        )
+        unsupported_versions = sorted(
+            [version for version in detected_versions_sorted if version not in supported_versions],
+            key=self._version_sort_key,
+        )
+
+        return {
+            "supported_versions": supported_versions,
+            "detected_versions": detected_versions_sorted,
+            "unsupported_versions": unsupported_versions,
+            "has_sessions": has_sessions,
+        }
+
+    def _extract_from_session_files(
+        self, session_titles: Dict[str, str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Extract sessions from Codex session files."""
+        sessions: Dict[str, Dict[str, Any]] = {}
+        sessions_dir = self.history_dir / "sessions"
+
+        if not sessions_dir.exists():
+            return sessions
+
+        for session_file in sessions_dir.rglob("*.jsonl"):
+            try:
+                fallback_session_id = self._extract_session_id_from_filename(
+                    session_file.name
+                )
+                session = self._create_session_template(
+                    session_id=fallback_session_id or session_file.stem,
+                    project_path=None,
+                    title=session_titles.get(fallback_session_id or session_file.stem),
+                    source_kind="session",
+                )
+                self._track_source_file(session, session_file)
+
+                with open(session_file, "r", encoding="utf-8") as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError as exc:
+                            self.logger.warning(
+                                "Invalid JSON in session file %s line %s: %s",
+                                session_file,
+                                line_num,
+                                exc,
+                            )
+                            continue
+
+                        self._process_session_record(record, session, session_file)
+
+                actual_session_id = session.get("session_id") or fallback_session_id
+                if not actual_session_id:
+                    continue
+
+                if actual_session_id in session_titles:
+                    session["metadata"]["thread_name"] = session_titles[actual_session_id]
+                    session["session"]["title"] = session_titles[actual_session_id]
+                else:
+                    session["session"]["title"] = (
+                        f"Codex session {actual_session_id[:8]}"
+                    )
+
+                if session["messages"]:
+                    sessions[actual_session_id] = session
+            except Exception as exc:
+                self.logger.warning(
+                    f"Error processing session file {session_file}: {exc}"
+                )
+                continue
+
+        return sessions
+
+    def _extract_from_history_jsonl(
+        self,
+        existing_session_ids: Optional[set] = None,
+        session_titles: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Extract fallback sessions from history.jsonl."""
+        sessions: Dict[str, Dict[str, Any]] = {}
         history_file = self.history_dir / "history.jsonl"
-        
+        existing_session_ids = existing_session_ids or set()
+        session_titles = session_titles or {}
+
         if not history_file.exists():
             return sessions
-        
+
         try:
-            with open(history_file, 'r', encoding='utf-8') as f:
+            with open(history_file, "r", encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
-                    
+
                     try:
                         entry = json.loads(line)
-                        session_id = entry.get('session_id', f'history_{line_num}')
-                        
-                        # Check if this entry is related to current project
-                        if not self._is_project_related(entry, project_path):
-                            continue
-                        
-                        if session_id not in sessions:
-                            sessions[session_id] = self._create_session_template(session_id, project_path)
-                        
-                        # Add user message
-                        text = entry.get('text', '')
-                        if text:
-                            sessions[session_id]['messages'].append({
-                                'role': 'user',
-                                'content': text,
-                                'timestamp': entry.get('ts'),
-                                'source': 'history.jsonl'
-                            })
-                            
-                            # Update timestamps
-                            if entry.get('ts'):
-                                ts = entry['ts']
-                                if sessions[session_id]['metadata']['created_at'] is None:
-                                    sessions[session_id]['metadata']['created_at'] = ts
-                                sessions[session_id]['metadata']['last_updated'] = ts
-                                
-                    except json.JSONDecodeError as e:
-                        self.logger.warning(f"Invalid JSON in history.jsonl line {line_num}: {e}")
+                    except json.JSONDecodeError as exc:
+                        self.logger.warning(
+                            "Invalid JSON in history.jsonl line %s: %s", line_num, exc
+                        )
                         continue
-                        
-        except Exception as e:
-            self.logger.warning(f"Error reading history.jsonl: {e}")
-        
+
+                    session_id = entry.get("session_id", f"history_{line_num}")
+                    if session_id in existing_session_ids:
+                        continue
+
+                    if session_id not in sessions:
+                        sessions[session_id] = self._create_session_template(
+                            session_id=session_id,
+                            project_path=None,
+                            title=session_titles.get(session_id),
+                            source_kind="history",
+                        )
+                        sessions[session_id]["metadata"]["fallback_only"] = True
+
+                    text = entry.get("text", "")
+                    if not text:
+                        continue
+
+                    sessions[session_id]["messages"].append(
+                        {
+                            "role": "user",
+                            "content": text,
+                            "timestamp": entry.get("ts"),
+                            "source": "history.jsonl",
+                        }
+                    )
+                    self._update_session_timestamps(
+                        sessions[session_id], entry.get("ts")
+                    )
+        except Exception as exc:
+            self.logger.warning(f"Error reading history.jsonl: {exc}")
+
         return sessions
-    
-    def _extract_from_session_files(self, project_path: str) -> Dict[str, Dict[str, Any]]:
-        """Extract sessions from session files."""
-        sessions = {}
-        sessions_dir = self.history_dir / "sessions"
-        
-        if not sessions_dir.exists():
-            return sessions
-        
-        # Walk through all session files
-        for session_file in sessions_dir.rglob("*.jsonl"):
-            try:
-                session_id = self._extract_session_id_from_filename(session_file.name)
-                if not session_id:
-                    continue
-                
-                if session_id not in sessions:
-                    sessions[session_id] = self._create_session_template(session_id, project_path)
-                
-                # Read session file
-                with open(session_file, 'r', encoding='utf-8') as f:
-                    for line in sessions[session_id]['messages']:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        
-                        try:
-                            record = json.loads(line)
-                            self._process_session_record(record, sessions[session_id], session_file)
-                        except json.JSONDecodeError:
-                            continue
-                            
-            except Exception as e:
-                self.logger.warning(f"Error processing session file {session_file}: {e}")
-                continue
-        
-        return sessions
-    
+
     def _extract_from_log_files(self, project_path: str) -> Dict[str, Dict[str, Any]]:
-        """Extract sessions from log files."""
-        sessions = {}
+        """Extract project-related synthetic sessions from log files."""
+        sessions: Dict[str, Dict[str, Any]] = {}
         log_dir = self.history_dir / "log"
-        
+
         if not log_dir.exists():
             return sessions
-        
-        # Process log files
+
         for log_file in log_dir.glob("*.log"):
             try:
-                session_id = f"log_{log_file.stem}"
-                
-                if session_id not in sessions:
-                    sessions[session_id] = self._create_session_template(session_id, project_path)
-                
-                # Read log file
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(log_file, "r", encoding="utf-8") as f:
                     log_content = f.read()
-                    
-                    # Extract relevant log entries
-                    if project_path in log_content:
-                        # Add log summary as a message
-                        sessions[session_id]['messages'].append({
-                            'role': 'system',
-                            'content': f"Log entries related to project: {log_content}",
-                            'timestamp': int(datetime.now().timestamp()),
-                            'source': str(log_file)
-                        })
-                        
-            except Exception as e:
-                self.logger.warning(f"Error processing log file {log_file}: {e}")
-                continue
-        
+
+                if project_path not in log_content:
+                    continue
+
+                session_id = f"log_{log_file.stem}"
+                session = self._create_session_template(
+                    session_id=session_id,
+                    project_path=project_path,
+                    title=f"Codex log {log_file.stem}",
+                    source_kind="log",
+                    synthetic=True,
+                )
+                self._track_source_file(session, log_file)
+                timestamp = int(datetime.now().timestamp())
+                session["messages"].append(
+                    {
+                        "role": "system",
+                        "content": f"Log entries related to project:\n{log_content}",
+                        "timestamp": timestamp,
+                        "source": str(log_file),
+                    }
+                )
+                self._update_session_timestamps(session, timestamp)
+                sessions[session_id] = session
+            except Exception as exc:
+                self.logger.warning(f"Error processing log file {log_file}: {exc}")
+
         return sessions
-    
+
     def _extract_from_config(self, project_path: str) -> Dict[str, Dict[str, Any]]:
-        """Extract project configuration information."""
-        sessions = {}
+        """Extract project-related synthetic session from config."""
+        sessions: Dict[str, Dict[str, Any]] = {}
         config_file = self.history_dir / "config.toml"
-        
+
         if not config_file.exists():
             return sessions
-        
+
         try:
-            # Read config file content
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 config_content = f.read()
-                
-                # Check if current project is in trusted projects
-                if project_path in config_content:
-                    session_id = "config_project"
-                    sessions[session_id] = self._create_session_template(session_id, project_path)
-                    
-                    # Add config information as a message
-                    sessions[session_id]['messages'].append({
-                        'role': 'system',
-                        'content': f"Project configuration: {config_content}",
-                        'timestamp': int(datetime.now().timestamp()),
-                        'source': 'config.toml'
-                    })
-                    
-        except Exception as e:
-            self.logger.warning(f"Error reading config file: {e}")
-        
+
+            if project_path not in config_content:
+                return sessions
+
+            session_id = "config_project"
+            session = self._create_session_template(
+                session_id=session_id,
+                project_path=project_path,
+                title="Codex project config",
+                source_kind="config",
+                synthetic=True,
+            )
+            self._track_source_file(session, config_file)
+            timestamp = int(datetime.now().timestamp())
+            session["messages"].append(
+                {
+                    "role": "system",
+                    "content": f"Project configuration:\n{config_content}",
+                    "timestamp": timestamp,
+                    "source": "config.toml",
+                }
+            )
+            self._update_session_timestamps(session, timestamp)
+            sessions[session_id] = session
+        except Exception as exc:
+            self.logger.warning(f"Error reading config file: {exc}")
+
         return sessions
-    
-    def _create_session_template(self, session_id: str, project_path: str) -> Dict[str, Any]:
+
+    def _load_session_titles(self) -> Dict[str, str]:
+        """Load session titles from session_index.jsonl if available."""
+        titles: Dict[str, str] = {}
+        index_file = self.history_dir / "session_index.jsonl"
+
+        if not index_file.exists():
+            return titles
+
+        try:
+            with open(index_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        self.logger.warning(
+                            "Invalid JSON in session_index.jsonl line %s: %s",
+                            line_num,
+                            exc,
+                        )
+                        continue
+
+                    session_id = entry.get("id")
+                    thread_name = entry.get("thread_name")
+                    if session_id and thread_name:
+                        titles[session_id] = thread_name
+        except Exception as exc:
+            self.logger.warning(f"Error reading session_index.jsonl: {exc}")
+
+        return titles
+
+    def _read_cli_version_from_session_file(
+        self, session_file: pathlib.Path
+    ) -> Optional[str]:
+        """Read cli_version from the session_meta record in a session file."""
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        self.logger.warning(
+                            "Invalid JSON in session file %s line %s: %s",
+                            session_file,
+                            line_num,
+                            exc,
+                        )
+                        return None
+
+                    if record.get("type") != "session_meta":
+                        continue
+
+                    payload = record.get("payload") or {}
+                    if isinstance(payload, dict):
+                        return payload.get("cli_version")
+                    return None
+        except Exception as exc:
+            self.logger.warning(
+                "Error reading Codex session version from %s: %s",
+                session_file,
+                exc,
+            )
+
+        return None
+
+    def _create_session_template(
+        self,
+        session_id: str,
+        project_path: Optional[str],
+        title: Optional[str] = None,
+        source_kind: str = "session",
+        synthetic: bool = False,
+    ) -> Dict[str, Any]:
         """Create a template for a new session."""
+        project_root = project_path or "/"
+        project_name = (
+            extract_project_name_from_path(project_root)
+            if project_path
+            else "Unknown Project"
+        )
+        session_title = title or f"Codex session {session_id[:8]}"
+
         return {
-            'session_id': session_id,
-            'messages': [],
-            'project': {
-                'name': get_project_name(),
-                'rootPath': project_path
+            "session_id": session_id,
+            "messages": [],
+            "project": {
+                "name": project_name,
+                "rootPath": project_root,
             },
-            'metadata': {
-                'source_files': [],
-                'created_at': None,
-                'last_updated': None,
-                'codex_path': project_path,
-                'extractor_version': '1.0'
-            }
+            "session": {
+                "sessionId": session_id,
+                "title": session_title,
+                "createdAt": None,
+                "lastUpdatedAt": None,
+            },
+            "metadata": {
+                "source_files": [],
+                "created_at": None,
+                "last_updated": None,
+                "codex_path": project_path,
+                "extractor_version": "2.0",
+                "source_kind": source_kind,
+                "synthetic": synthetic,
+            },
         }
-    
-    def _is_project_related(self, entry: Dict[str, Any], project_path: str) -> bool:
-        """Check if an entry is related to the current project."""
-        # Check various fields that might contain project information
-        text = entry.get('text', '')
-        path = entry.get('path', '')
-        
-        return project_path in text or project_path in path
-    
+
+    def _process_session_record(
+        self, record: Dict[str, Any], session: Dict[str, Any], file_path: pathlib.Path
+    ) -> None:
+        """Process a single record from a session file."""
+        record_type = record.get("type")
+        payload = record.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        if record_type == "session_meta":
+            self._apply_session_meta(record, payload, session)
+            return
+
+        if record_type == "turn_context":
+            self._apply_turn_context(payload, session)
+            return
+
+        if record_type != "response_item":
+            return
+
+        payload_type = payload.get("type")
+        timestamp = record.get("timestamp")
+
+        if payload_type == "message":
+            role = payload.get("role")
+            if role not in {"user", "assistant"}:
+                return
+
+            text_content = self._extract_text_content(payload.get("content"))
+            if not text_content:
+                return
+
+            session["messages"].append(
+                {
+                    "role": role,
+                    "content": text_content,
+                    "timestamp": timestamp,
+                    "source": str(file_path),
+                }
+            )
+            self._update_session_timestamps(session, timestamp)
+            return
+
+        if payload_type == "function_call":
+            self._append_tool_message(
+                session=session,
+                role="assistant",
+                heading=f"Function Call: {payload.get('name', 'unknown')}",
+                body=self._format_block(payload.get("arguments"), default_language="json"),
+                timestamp=timestamp,
+                source=str(file_path),
+            )
+            return
+
+        if payload_type == "function_call_output":
+            self._append_tool_message(
+                session=session,
+                role="system",
+                heading=f"Function Output: {payload.get('call_id', 'unknown')}",
+                body=self._format_block(payload.get("output")),
+                timestamp=timestamp,
+                source=str(file_path),
+            )
+            return
+
+        if payload_type == "custom_tool_call":
+            self._append_tool_message(
+                session=session,
+                role="assistant",
+                heading=f"Tool Call: {payload.get('name', 'unknown')}",
+                body=self._format_block(payload.get("input")),
+                timestamp=timestamp,
+                source=str(file_path),
+            )
+            return
+
+        if payload_type == "custom_tool_call_output":
+            self._append_tool_message(
+                session=session,
+                role="system",
+                heading=f"Tool Output: {payload.get('call_id', 'unknown')}",
+                body=self._format_block(payload.get("output")),
+                timestamp=timestamp,
+                source=str(file_path),
+            )
+            return
+
+        if payload_type == "web_search_call":
+            self._append_tool_message(
+                session=session,
+                role="assistant",
+                heading="Web Search",
+                body=self._format_block(payload.get("action"), default_language="json"),
+                timestamp=timestamp,
+                source=str(file_path),
+            )
+
+    def _apply_session_meta(
+        self, record: Dict[str, Any], payload: Dict[str, Any], session: Dict[str, Any]
+    ) -> None:
+        """Apply session metadata from session_meta."""
+        session_id = payload.get("id")
+        if session_id:
+            session["session_id"] = session_id
+            session["session"]["sessionId"] = session_id
+
+        cwd = payload.get("cwd")
+        if cwd:
+            session["project"]["rootPath"] = cwd
+            session["project"]["name"] = extract_project_name_from_path(cwd)
+            session["metadata"]["codex_path"] = cwd
+
+        if payload.get("timestamp"):
+            self._update_session_timestamps(session, payload.get("timestamp"))
+        elif record.get("timestamp"):
+            self._update_session_timestamps(session, record.get("timestamp"))
+
+        if payload.get("cli_version"):
+            session["metadata"]["cli_version"] = payload.get("cli_version")
+        if payload.get("source"):
+            session["metadata"]["codex_source"] = payload.get("source")
+        if payload.get("model_provider"):
+            session["metadata"]["model_provider"] = payload.get("model_provider")
+
+    def _apply_turn_context(
+        self, payload: Dict[str, Any], session: Dict[str, Any]
+    ) -> None:
+        """Apply useful metadata from turn_context when available."""
+        cwd = payload.get("cwd")
+        if cwd and session["project"]["rootPath"] == "/":
+            session["project"]["rootPath"] = cwd
+            session["project"]["name"] = extract_project_name_from_path(cwd)
+            session["metadata"]["codex_path"] = cwd
+
+    def _append_tool_message(
+        self,
+        session: Dict[str, Any],
+        role: str,
+        heading: str,
+        body: str,
+        timestamp: Optional[Any],
+        source: str,
+    ) -> None:
+        """Append a tool-related message and keep timestamps in sync."""
+        session["messages"].append(
+            {
+                "role": role,
+                "content": f"**{heading}**\n{body}",
+                "timestamp": timestamp,
+                "source": source,
+            }
+        )
+        self._update_session_timestamps(session, timestamp)
+
+    def _track_source_file(
+        self, session: Dict[str, Any], file_path: pathlib.Path
+    ) -> None:
+        """Track source files for session metadata."""
+        source_file = str(file_path)
+        if source_file not in session["metadata"]["source_files"]:
+            session["metadata"]["source_files"].append(source_file)
+
     def _extract_session_id_from_filename(self, filename: str) -> Optional[str]:
         """Extract session ID from filename."""
-        # Example: rollout-2025-08-17T13-42-18-fa0195a0-3f1d-4f2c-b6c2-4ef50e47ba23.jsonl
-        match = re.search(r'rollout-.*?-([a-f0-9-]+)\.jsonl', filename)
+        match = re.search(
+            r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jsonl$",
+            filename,
+        )
         if match:
             return match.group(1)
         return None
-    
-    def _process_session_record(self, record: Dict[str, Any], session: Dict[str, Any], file_path: str):
-        """Process a single record from a session file."""
-        record_type = record.get('type')
-        
-        if record_type == 'message':
-            role = record.get('role')
-            content = record.get('content', [])
-            
-            if role and content:
-                # Extract text content
-                text_content = ""
-                for item in content:
-                    if isinstance(item, dict) and item.get('type') == 'input_text':
-                        text_content += item.get('text', '')
-                    elif isinstance(item, dict) and item.get('type') == 'output_text':
-                        text_content += item.get('text', '')
-                
-                if text_content:
-                    session['messages'].append({
-                        'role': role,
-                        'content': text_content,
-                        'timestamp': record.get('timestamp'),
-                        'source': str(file_path)
-                    })
-                    
-                    # Update timestamps
-                    if record.get('timestamp'):
-                        ts = self._parse_timestamp(record['timestamp'])
-                        if ts and session['metadata']['created_at'] is None:
-                            session['metadata']['created_at'] = ts
-                        if ts:
-                            session['metadata']['last_updated'] = ts
-        
-        elif record_type == 'function_call':
-            # Handle function calls
-            func_name = record.get('name', 'unknown')
-            arguments = record.get('arguments', '{}')
-            
-            session['messages'].append({
-                'role': 'assistant',
-                'content': f"**Function Call: {func_name}**\n```json\n{arguments}\n```",
-                'timestamp': record.get('timestamp'),
-                'source': str(file_path)
-            })
-        
-        elif record_type == 'function_call_output':
-            # Handle function call outputs
-            call_id = record.get('call_id', 'unknown')
-            output = record.get('output', '{}')
-            
-            session['messages'].append({
-                'role': 'system',
-                'content': f"**Function Output: {call_id}**\n```json\n{output}\n```",
-                'timestamp': record.get('timestamp'),
-                'source': str(file_path)
-            })
-    
-    def _parse_timestamp(self, timestamp_str: str) -> Optional[int]:
-        """Parse timestamp string to Unix timestamp."""
+
+    def _extract_text_content(self, content: Any) -> str:
+        """Extract text from Codex content items."""
+        if isinstance(content, str):
+            return content.strip()
+
+        if not isinstance(content, list):
+            return ""
+
+        parts: List[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") in {"input_text", "output_text"} and item.get("text"):
+                parts.append(str(item["text"]))
+
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+
+    def _format_block(self, value: Any, default_language: str = "") -> str:
+        """Format tool payloads inside fenced code blocks."""
+        text = self._stringify_value(value)
+        language = default_language
+        if not language and self._looks_like_json(text):
+            language = "json"
+
+        if language:
+            return f"```{language}\n{text}\n```"
+        return f"```\n{text}\n```"
+
+    def _stringify_value(self, value: Any) -> str:
+        """Convert arbitrary data into readable text."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
         try:
-            # Handle ISO format timestamps
-            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-            return int(dt.timestamp())
-        except:
+            return json.dumps(value, indent=2, ensure_ascii=False, default=str)
+        except TypeError:
+            return str(value)
+
+    def _looks_like_json(self, value: str) -> bool:
+        """Check whether a string looks like JSON."""
+        text = value.strip()
+        if not text:
+            return False
+        if not (
+            (text.startswith("{") and text.endswith("}"))
+            or (text.startswith("[") and text.endswith("]"))
+        ):
+            return False
+        try:
+            json.loads(text)
+            return True
+        except json.JSONDecodeError:
+            return False
+
+    def _update_session_timestamps(
+        self, session: Dict[str, Any], timestamp_value: Optional[Any]
+    ) -> None:
+        """Update session timestamps from a raw timestamp value."""
+        timestamp = self._parse_timestamp(timestamp_value)
+        if timestamp is None:
+            return
+
+        if session["metadata"]["created_at"] is None:
+            session["metadata"]["created_at"] = timestamp
+            session["session"]["createdAt"] = timestamp * 1000
+
+        session["metadata"]["last_updated"] = timestamp
+        session["session"]["lastUpdatedAt"] = timestamp * 1000
+
+    def _parse_timestamp(self, timestamp_value: Optional[Any]) -> Optional[int]:
+        """Parse timestamp values to Unix seconds."""
+        if timestamp_value is None:
+            return None
+
+        if isinstance(timestamp_value, (int, float)):
+            timestamp = float(timestamp_value)
+            if timestamp > 1e10:
+                timestamp /= 1000
+            return int(timestamp)
+
+        if isinstance(timestamp_value, str):
             try:
-                # Handle Unix timestamp
-                return int(timestamp_str)
-            except:
+                return int(float(timestamp_value))
+            except ValueError:
+                pass
+
+            try:
+                dt = datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
+                return int(dt.timestamp())
+            except ValueError:
                 return None
-    
+
+        return None
+
+    def _version_sort_key(self, version: str) -> List[Any]:
+        """Sort versions naturally while keeping exact string comparison for support."""
+        return [
+            int(part) if part.isdigit() else part
+            for part in re.split(r"([0-9]+)", version)
+            if part
+        ]
+
     def _generate_preview(self, chat: Dict[str, Any]) -> str:
         """Generate a preview of the chat session."""
-        if not chat['messages']:
+        if not chat["messages"]:
             return "No messages"
-        
-        # Get first user message as preview
-        for message in chat['messages']:
-            if message['role'] == 'user':
-                content = message['content']
+
+        thread_name = chat.get("metadata", {}).get("thread_name")
+        if thread_name:
+            return thread_name
+
+        for message in chat["messages"]:
+            if message["role"] == "user":
+                content = message["content"].replace("\n", " ")
                 if len(content) > 100:
                     content = content[:100] + "..."
                 return content
-        
-        return "Codex session"
+
+        return chat.get("session", {}).get("title", "Codex session")

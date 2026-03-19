@@ -1,5 +1,5 @@
 """
-Configuration management for AnySpecs CLI.
+Runtime configuration management for AnySpecs CLI.
 """
 
 import os
@@ -9,13 +9,12 @@ from typing import Dict, Any, Optional
 
 class Config:
     """Configuration class for AnySpecs."""
-    
+
     def __init__(self):
         self.config_dir = Path.home() / '.anyspecs'
         self.config_file = self.config_dir / 'config.json'
         self._config = {}
-        
-        # Default configuration
+
         self.defaults = {
             'export': {
                 'default_format': 'markdown',
@@ -27,7 +26,13 @@ class Config:
                     'token': None
                 },
                 'oss': {
-                    'username': None
+                    'username': None,
+                    'bucket': None,
+                    'endpoint': None,
+                    'region': None,
+                    'access_key_id': None,
+                    'access_key_secret': None,
+                    'public_base_url': None
                 }
             },
             'sources': {
@@ -57,9 +62,9 @@ class Config:
                 'validate_output': True
             }
         }
-        
+
         self.load()
-    
+
     def load(self):
         """Load configuration from file."""
         if self.config_file.exists():
@@ -69,47 +74,46 @@ class Config:
                     self._config = json.load(f)
             except Exception:
                 self._config = {}
-        
-        # Merge with defaults
+
         self._merge_defaults()
-    
+
     def save(self):
         """Save configuration to file."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             import json
             with open(self.config_file, 'w') as f:
                 json.dump(self._config, f, indent=2)
         except Exception:
             pass
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value using dot notation."""
         keys = key.split('.')
         value = self._config
-        
+
         for k in keys:
             if isinstance(value, dict) and k in value:
                 value = value[k]
             else:
                 return default
-        
+
         return value
-    
+
     def set(self, key: str, value: Any):
         """Set a configuration value using dot notation."""
         keys = key.split('.')
         config = self._config
-        
+
         for k in keys[:-1]:
             if k not in config:
                 config[k] = {}
             config = config[k]
-        
+
         config[keys[-1]] = value
         self.save()
-    
+
     def _merge_defaults(self):
         """Merge default configuration with loaded config."""
         def merge_dict(target: dict, source: dict):
@@ -118,13 +122,13 @@ class Config:
                     merge_dict(target[key], value)
                 elif key not in target:
                     target[key] = value
-        
+
         merge_dict(self._config, self.defaults)
-    
+
     def get_ai_config(self) -> Dict[str, Any]:
         """Get AI-related configuration."""
         return self.get('ai', {})
-    
+
     def get_compress_config(self) -> Dict[str, Any]:
         """Get compression-related configuration."""
         return self.get('compress', {})
@@ -132,30 +136,33 @@ class Config:
     def get_upload_config(self, hub_type: str) -> Dict[str, Any]:
         """Get upload-related configuration for a specific hub type."""
         return self.get(f'upload.{hub_type}', {})
-    
+
     def set_ai_api_key(self, api_key: str):
         """Set AI API key."""
         self.set('ai.api_key', api_key)
-    
+
     def get_ai_api_key(self) -> Optional[str]:
         """Get AI API key from config or environment."""
-        import os
         return self.get('ai.api_key') or os.getenv('ANYSPECS_AI_API_KEY')
-    
+
     def get_ai_base_url(self) -> str:
         """Get AI API base URL."""
-        import os
-        return (self.get('ai.base_url') or 
-                os.getenv('ANYSPECS_AI_BASE_URL') or 
-                self.get('ai.default_base_url'))
-    
+        return (
+            self.get('ai.base_url')
+            or os.getenv('ANYSPECS_AI_BASE_URL')
+            or self.get('ai.default_base_url')
+        )
+
     def get_ai_model(self) -> str:
         """Get AI model."""
-        import os
-        return (self.get('ai.model') or 
-                os.getenv('ANYSPECS_AI_MODEL') or 
-                self.get('ai.default_model'))
+        return (
+            self.get('ai.model')
+            or os.getenv('ANYSPECS_AI_MODEL')
+            or self.get('ai.default_model')
+        )
 
 
-# Global configuration instance
-config = Config() 
+config = Config()
+
+
+__all__ = ['Config', 'config']
