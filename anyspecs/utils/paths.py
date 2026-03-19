@@ -55,8 +55,13 @@ def get_claude_history_path(project_path: Optional[str] = None) -> pathlib.Path:
         project_path = os.getcwd()
     
     encoded_path = project_path.replace('/', '-')
-    history_base = pathlib.Path.home() / '.claude' / 'projects'
+    history_base = get_claude_projects_root()
     return history_base / encoded_path
+
+
+def get_claude_projects_root() -> pathlib.Path:
+    """Get the Claude Code projects root directory."""
+    return pathlib.Path.home() / '.claude' / 'projects'
 
 
 def extract_project_name_from_path(root_path: str, debug: bool = False) -> str:

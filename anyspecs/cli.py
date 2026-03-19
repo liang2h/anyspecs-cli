@@ -210,6 +210,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # Collect sessions from all requested sources
         all_sessions = []
         sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        self._print_claude_version_notice(sources_to_check)
         self._print_codex_version_notice(sources_to_check)
         
         for source in sources_to_check:
@@ -264,6 +265,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # Collect chats from all requested sources
         all_chats = []
         sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        self._print_claude_version_notice(sources_to_check)
         self._print_codex_version_notice(sources_to_check)
         
         for source in sources_to_check:
@@ -302,10 +304,34 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
 
     def _print_codex_version_notice(self, sources_to_check: List[str]) -> None:
         """Print supported and detected Codex versions when Codex is involved."""
-        if 'codex' not in sources_to_check:
+        self._print_source_version_notice(
+            sources_to_check=sources_to_check,
+            source_name='codex',
+            display_name='Codex',
+            history_label='session',
+        )
+
+    def _print_claude_version_notice(self, sources_to_check: List[str]) -> None:
+        """Print supported and detected Claude versions when Claude is involved."""
+        self._print_source_version_notice(
+            sources_to_check=sources_to_check,
+            source_name='claude',
+            display_name='Claude',
+            history_label='history',
+        )
+
+    def _print_source_version_notice(
+        self,
+        sources_to_check: List[str],
+        source_name: str,
+        display_name: str,
+        history_label: str,
+    ) -> None:
+        """Print supported and detected source versions when available."""
+        if source_name not in sources_to_check:
             return
 
-        extractor = self.extractors.get('codex')
+        extractor = self.extractors.get(source_name)
         if not extractor or not hasattr(extractor, 'get_version_support_info'):
             return
 
@@ -321,20 +347,22 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         has_sessions = info.get('has_sessions', False)
 
         supported_text = ", ".join(supported_versions) if supported_versions else "Unknown"
-        print(f"ℹ️ Codex 已验证支持版本: {supported_text}")
+        print(f"ℹ️ {display_name} 已验证支持版本: {supported_text}")
 
         if detected_versions:
             detected_text = ", ".join(detected_versions)
-            print(f"ℹ️ 本机检测到的 Codex 版本: {detected_text}")
+            print(f"ℹ️ 本机检测到的 {display_name} 版本: {detected_text}")
         elif has_sessions:
-            print("ℹ️ 检测到了 Codex session 文件，但未读取到 cli_version 信息")
+            print(
+                f"ℹ️ 检测到了 {display_name} {history_label} 文件，但未读取到 version 信息"
+            )
         else:
-            print("ℹ️ 未检测到 Codex session 版本信息")
+            print(f"ℹ️ 未检测到 {display_name} {history_label} 版本信息")
 
         if unsupported_versions:
             unsupported_text = ", ".join(unsupported_versions)
             print(
-                "⚠️ 检测到未验证的 Codex 版本: "
+                f"⚠️ 检测到未验证的 {display_name} 版本: "
                 f"{unsupported_text}，可能无法完整解析会话内容，但仍会继续尝试。"
             )
 
