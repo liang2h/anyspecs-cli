@@ -8,6 +8,12 @@ Supports Cursor AI and Claude Code with various export formats.
 __version__ = "0.0.5"
 __author__ = "AnySpecs Team"
 
-from .cli import main
 
-__all__ = ["main"] 
+def main():
+    """Run the CLI entrypoint without importing heavy dependencies eagerly."""
+    from .cli import main as cli_main
+
+    return cli_main()
+
+
+__all__ = ["main"]
