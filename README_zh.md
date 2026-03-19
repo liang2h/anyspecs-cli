@@ -22,8 +22,9 @@ AnySpecs CLI 是一个统一的命令行工具，用于从多个 AI 助手导出
 - **项目与工作区过滤**: 按项目或当前目录导出聊天会话。
 - **灵活的会话管理**: 列表、筛选和导出特定的聊天会话。
 - **默认导出目录**: 所有导出的文件默认保存到 `.anyspecs/` 目录，统一管理。
+- **稳定导出文件**: 导出文件名使用完整 `session_id`，并生成配套 `.meta.json` sidecar 供后续上传。
 - **AI 总结**: 将聊天记录总结为结构化 `.specs` 文件。
-- **上传分享**: 将导出的文件上传到远程服务器（AnySpecs Hub 或自建 ASAP）。
+- **上传分享**: 将导出的文件上传到 AnySpecs Hub / ASAP，或直接上传到阿里云 OSS。
 - **终端历史与文件变更**: 导出终端历史与文件 diff（开发中）。
 
 ## 📦 安装
@@ -77,6 +78,11 @@ anyspecs export --session-id abc123 --format json
 
 # 导出指定来源（默认 markdown）并自定义输出目录
 anyspecs export --source claude/cursor/kiro/augment/codex --format markdown --output ./exports
+
+# 导出文件默认写入 .anyspecs/，文件名包含完整 session_id，并附带 sidecar 元数据
+# 例如：
+#   .anyspecs/codex-chat-anyspecs-cli-019d04f1-b713-7701-9c80-a9752539fa7f.md
+#   .anyspecs/codex-chat-anyspecs-cli-019d04f1-b713-7701-9c80-a9752539fa7f.md.meta.json
 ```
 
 ### 配置（Setup）
@@ -100,24 +106,71 @@ anyspecs compress [--input anyspecs.md] [--output anyspecs.specs] \
 
 ### 上传分享你的 specs（Upload）
 
+`upload` 现在支持两种后端：
+
+- `--hub-type anyspecs`: 上传到 AnySpecs Hub / ASAP
+- `--hub-type oss`: 直接上传到阿里云 OSS
+
+#### 上传到 AnySpecs Hub
+
 > 默认上传地址为官方 Hub `https://hub.anyspecs.cn/`，你也可以自建 [ASAP](https://github.com/anyspecs/ASAP)。
 
 首次上传前，请在 `https://hub.anyspecs.cn/setting` 生成访问令牌，并导出到环境变量，例如：
 
 ```bash
 export ANYSPECS_TOKEN="44xxxxxxxxxxxxxx7a82"
-
-# 检查远端仓库
-anyspecs upload --list
-# 搜索特定仓库
-anyspecs upload --search "My specs"
-# 上传文件到远端
-anyspecs upload --file anyspecs.specs
-# 携带描述信息上传
-anyspecs upload --file anyspecs.specs --description "My specs"
-# 使用自定义服务器
-anyspecs upload --url http://your-server:3000 --file anyspecs.specs
+# 可选，默认就是 https://hub.anyspecs.cn/
+export ANYSPECS_UPLOAD_URL="https://hub.anyspecs.cn/"
 ```
+
+```bash
+# 检查远端仓库
+anyspecs upload --hub-type anyspecs --list
+# 搜索特定仓库
+anyspecs upload --hub-type anyspecs --search "My specs"
+# 上传文件到 Hub
+anyspecs upload --hub-type anyspecs --file anyspecs.specs
+# 携带描述信息上传
+anyspecs upload --hub-type anyspecs --file anyspecs.specs --description "My specs"
+# 递归上传目录下所有文件
+anyspecs upload --hub-type anyspecs --dir .anyspecs
+# 使用自定义服务器
+anyspecs upload --hub-type anyspecs --url http://your-server:3000 --file anyspecs.specs
+```
+
+#### 直接上传到阿里云 OSS
+
+OSS 模式通过阿里云 `oss2` SDK 直传，不使用 `--url`，也不依赖 `ANYSPECS_TOKEN`。
+
+必需环境变量：
+
+```bash
+export ANYSPECS_UPLOAD_USERNAME="your-name"
+export OSS_BUCKET="your-bucket"
+export OSS_ENDPOINT="oss-cn-hangzhou.aliyuncs.com"
+# 或者不用 OSS_ENDPOINT，改用 OSS_REGION
+# export OSS_REGION="cn-hangzhou"
+export OSS_ACCESS_KEY_ID="your-ak"
+export OSS_ACCESS_KEY_SECRET="your-sk"
+```
+
+```bash
+# 上传单个导出文件
+anyspecs upload --hub-type oss --file .anyspecs/chat.md
+
+# 递归上传默认导出目录
+anyspecs upload --hub-type oss --dir
+
+# 递归上传指定导出目录
+anyspecs upload --hub-type oss --dir ./exports
+```
+
+OSS 上传规则：
+
+- `oss` 模式只会上传旁边有 `.meta.json` sidecar 的导出文件
+- OSS object key 格式为 `<username>/<YYYY>/<MM>/<DD>/<filename>`
+- 同一个导出文件重复上传会落到同一个 object key，由 OSS 覆盖写实现去重
+- sidecar 中的来源、session、格式、日期等信息会同步写入 OSS object metadata
 
 ## 🔌 支持的来源
 
@@ -177,6 +230,9 @@ mypy anyspecs/
 - 新增 Codex CLI 支持
 - 新增 Dify 工作流压缩支持
 - 新增上传到远程服务器（Hub/ASAP）
+- 新增直传阿里云 OSS 支持
+- 新增 `upload --hub-type anyspecs|oss` 与目录递归上传
+- 导出文件名改为完整 `session_id`，并生成 `.meta.json` sidecar
 
 ### v0.0.4
 - 新增 Augment Code 支持
