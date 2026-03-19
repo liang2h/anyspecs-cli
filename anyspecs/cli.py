@@ -424,9 +424,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
     
     def _export_single_chat(self, chat: Dict[str, Any], formatter, args) -> int:
         """Export a single chat."""
-        session_id = chat.get('session_id', 'unknown')[:8]
-        project_name = chat.get('project', {}).get('name', 'unknown').replace(' ', '_')
-        source = chat.get('source', 'unknown')
+        filename_stem = self._build_export_filename_stem(chat)
         
         # Determine output path - default to .anyspecs directory
         if args.output:
@@ -437,8 +435,11 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         
         if output_base.is_dir() or not output_base.suffix:
             # Generate a filename
-            filename = f"{source}-chat-{project_name}-{session_id}"
-            output_path = output_base / filename if output_base.is_dir() else pathlib.Path(str(output_base) + f"-{session_id}")
+            output_path = (
+                output_base / filename_stem
+                if output_base.is_dir()
+                else pathlib.Path(f"{output_base}-{chat.get('session_id', 'unknown')}")
+            )
         else:
             output_path = output_base
         
@@ -471,13 +472,8 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         
         success_count = 0
         for i, chat in enumerate(chats, 1):
-            # Generate filename
-            session_id = chat.get('session_id', '')[:8] or f'chat{i:03d}'
-            project_name = chat.get('project', {}).get('name', 'unknown').replace(' ', '_')
-            source = chat.get('source', 'unknown')
-
-            filename = f"{source}-chat-{project_name}-{session_id}"
-            output_path = output_base / filename
+            filename_stem = self._build_export_filename_stem(chat, fallback=f'chat{i:03d}')
+            output_path = output_base / filename_stem
             
             # Add extension if needed
             if not output_path.suffix:
@@ -493,6 +489,17 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         print(f"\n🎉 Batch export completed! {success_count}/{len(chats)} files exported to: {output_base}")
         
         return 0 if success_count > 0 else 1
+
+    def _build_export_filename_stem(
+        self,
+        chat: Dict[str, Any],
+        fallback: str = 'unknown',
+    ) -> str:
+        """Build a stable export filename stem."""
+        session_id = str(chat.get('session_id') or fallback)
+        project_name = chat.get('project', {}).get('name', 'unknown').replace(' ', '_')
+        source = chat.get('source', 'unknown')
+        return f"{source}-chat-{project_name}-{session_id}"
 
     def _upload_command(self, args) -> int:
         """Execute the upload command."""

@@ -417,8 +417,8 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     assert first == 0
     assert second == 0
 
-    export_file = tmp_path / "codex-chat-demo-app-session-.md"
-    metadata_file = tmp_path / "codex-chat-demo-app-session-.md.meta.json"
+    export_file = tmp_path / "codex-chat-demo-app-session-12345678.md"
+    metadata_file = tmp_path / "codex-chat-demo-app-session-12345678.md.meta.json"
     assert export_file.exists()
     assert metadata_file.exists()
 
