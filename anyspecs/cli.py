@@ -145,6 +145,8 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         export_parser.add_argument('--limit', '-l',
                                  type=int,
                                  help='Limit export count')
+        export_parser.add_argument('--now', action='store_true',
+                                 help='Only export chat sessions from today in local time')
         export_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
         
 
@@ -201,6 +203,8 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         operation_group.add_argument('--list', action='store_true', help='List files on AnySpecs hub')
         operation_group.add_argument('--search', help='Search file keyword on AnySpecs hub')
         upload_parser.add_argument('--page', type=int, default=0, help='Page number (starting from 0)')
+        upload_parser.add_argument('--rm', action='store_true',
+                                   help='Remove local files after successful upload')
         upload_parser.add_argument('--http', action='store_true', help='Force use HTTP instead of HTTPS for testing')
         upload_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
 
@@ -415,12 +419,89 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         else:
             # User explicitly requested to export all projects
             print("📋 Exporting all projects' sessions")
+
+        # Today's sessions only
+        if getattr(args, 'now', False):
+            today = datetime.datetime.now().astimezone().date()
+            filtered_chats = [
+                chat for chat in filtered_chats
+                if self._chat_matches_local_date(chat, today)
+            ]
+            if not filtered_chats:
+                print("❌ No chat records found for today")
+                return []
+            print(f"📅 Filtering to today's sessions: {today.isoformat()}")
         
         # Limit
         if args.limit:
             filtered_chats = filtered_chats[:args.limit]
         
         return filtered_chats
+
+    def _chat_matches_local_date(
+        self,
+        chat: Dict[str, Any],
+        target_date: datetime.date,
+    ) -> bool:
+        """Return True when a chat belongs to the provided local calendar date."""
+        chat_date = self._parse_chat_local_date(chat.get('date'))
+        if chat_date is None:
+            logger = self.logger
+            if logger:
+                logger.debug(
+                    "Skipping chat with unparseable date for --now filter: session_id=%s raw_date=%r",
+                    chat.get('session_id', 'unknown'),
+                    chat.get('date'),
+                )
+            return False
+        return chat_date == target_date
+
+    def _parse_chat_local_date(self, value: Any) -> Optional[datetime.date]:
+        """Parse supported chat date formats into a local calendar date."""
+        if value is None:
+            return None
+
+        if isinstance(value, datetime.datetime):
+            dt = value
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.date()
+
+        if isinstance(value, datetime.date):
+            return value
+
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 1e10:
+                timestamp /= 1000
+            try:
+                return datetime.datetime.fromtimestamp(timestamp).date()
+            except (OverflowError, OSError, ValueError):
+                return None
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+
+            try:
+                numeric_timestamp = float(stripped)
+            except ValueError:
+                numeric_timestamp = None
+
+            if numeric_timestamp is not None:
+                return self._parse_chat_local_date(numeric_timestamp)
+
+            try:
+                dt = datetime.datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+            if dt.tzinfo is not None:
+                dt = dt.astimezone()
+            return dt.date()
+
+        return None
     
     def _export_single_chat(self, chat: Dict[str, Any], formatter, args) -> int:
         """Export a single chat."""
@@ -535,9 +616,19 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             return 1
 
         if args.file:
-            return 0 if client.upload_file(str(args.file), args.description) else 1
+            success = client.upload_file(str(args.file), args.description)
+            if success and args.rm:
+                self._cleanup_uploaded_path(args.file, include_sidecar=True)
+            return 0 if success else 1
         if args.dir:
-            summary = client.upload_directory_anyspecs(str(args.dir), args.description)
+            on_success = None
+            if args.rm:
+                on_success = lambda path: self._cleanup_uploaded_path(path, include_sidecar=False)
+            summary = client.upload_directory_anyspecs(
+                str(args.dir),
+                args.description,
+                on_success=on_success,
+            )
             self._print_upload_summary(args.dir, summary)
             return 0 if summary['success'] > 0 else 1
         if args.list:
@@ -586,18 +677,25 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         client = AnySpecsUploadClient()
 
         if args.file:
-            return 0 if client.upload_exported_file(
+            success = client.upload_exported_file(
                 str(args.file),
                 description=args.description,
                 username=username,
                 oss_config=oss_config,
-            ) else 1
+            )
+            if success and args.rm:
+                self._cleanup_uploaded_path(args.file, include_sidecar=True)
+            return 0 if success else 1
 
+        on_success = None
+        if args.rm:
+            on_success = lambda path: self._cleanup_uploaded_path(path, include_sidecar=True)
         summary = client.upload_directory_oss(
             str(args.dir),
             description=args.description,
             username=username,
             oss_config=oss_config,
+            on_success=on_success,
         )
         self._print_upload_summary(args.dir, summary)
         return 0 if summary['success'] > 0 else 1
@@ -639,6 +737,22 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             f"Failed: {summary.get('failed', 0)} | "
             f"Skipped: {summary.get('skipped', 0)}"
         )
+
+    def _cleanup_uploaded_path(self, path: pathlib.Path, include_sidecar: bool) -> None:
+        """Remove an uploaded file and, optionally, its metadata sidecar."""
+        targets = [path]
+        if include_sidecar and not path.name.endswith(".meta.json"):
+            metadata_path = AnySpecsUploadClient.get_export_metadata_path(path)
+            if metadata_path != path:
+                targets.append(metadata_path)
+
+        for target in targets:
+            if not target.exists():
+                continue
+            try:
+                target.unlink()
+            except Exception as e:
+                print(f"⚠️ Failed to remove local file after upload: {target} ({e})")
 
     def _write_export_artifacts(self, chat: Dict[str, Any], formatter, output_path: pathlib.Path) -> None:
         """Write export content and metadata sidecar."""

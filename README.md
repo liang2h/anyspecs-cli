@@ -70,6 +70,9 @@ anyspecs export
 # Export all sessions to HTML (default to .anyspecs/)
 anyspecs export --all-projects --format html
 
+# Export only today's sessions in local time
+anyspecs export --now
+
 # Export specific session
 anyspecs export [--session-id abc123] [--format json]
 
@@ -130,6 +133,8 @@ anyspecs upload --hub-type anyspecs --file anyspecs.specs
 anyspecs upload --hub-type anyspecs --file anyspecs.specs --description "My specs"
 # Upload all files under a directory recursively
 anyspecs upload --hub-type anyspecs --dir .anyspecs
+# Upload and remove local files after success
+anyspecs upload --hub-type anyspecs --dir .anyspecs --rm
 # Use a custom server
 anyspecs upload --hub-type anyspecs --url http://your-server:3000 --file anyspecs.specs
 ```
@@ -157,6 +162,9 @@ anyspecs upload --hub-type oss --file .anyspecs/chat.md
 # Upload the default export directory recursively
 anyspecs upload --hub-type oss --dir
 
+# Upload and remove exported files plus sidecars after success
+anyspecs upload --hub-type oss --dir --rm
+
 # Upload a specific export directory recursively
 anyspecs upload --hub-type oss --dir ./exports
 ```
@@ -167,6 +175,7 @@ OSS upload rules:
 - Object key format is `<username>/<YYYY>/<MM>/<DD>/<filename>`
 - Re-uploading the same exported file writes to the same OSS object key, so OSS overwrite behavior handles deduplication
 - Sidecar metadata is also written to OSS object metadata for traceability
+- `upload --rm` removes local files only after a successful upload; in `oss` mode it also removes the neighboring `.meta.json` sidecar
 
 ### More Functions
 

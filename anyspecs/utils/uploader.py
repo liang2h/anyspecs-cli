@@ -9,7 +9,7 @@ import mimetypes
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 class AnySpecsUploadClient:
@@ -200,12 +200,15 @@ class AnySpecsUploadClient:
         self,
         directory: str,
         description: str = "",
+        on_success: Optional[Callable[[Path], None]] = None,
     ) -> Dict[str, int]:
         files = self.iter_files(directory)
         summary = {"success": 0, "failed": 0, "skipped": 0}
         for path in files:
             if self.upload_file(str(path), description):
                 summary["success"] += 1
+                if on_success:
+                    on_success(path)
             else:
                 summary["failed"] += 1
         return summary
@@ -216,6 +219,7 @@ class AnySpecsUploadClient:
         description: str = "",
         username: str = "",
         oss_config: Optional[Dict[str, Any]] = None,
+        on_success: Optional[Callable[[Path], None]] = None,
     ) -> Dict[str, int]:
         files = self.iter_files(directory)
         summary = {"success": 0, "failed": 0, "skipped": 0}
@@ -238,6 +242,8 @@ class AnySpecsUploadClient:
                 oss_config=oss_config,
             ):
                 summary["success"] += 1
+                if on_success:
+                    on_success(path)
             else:
                 summary["failed"] += 1
 

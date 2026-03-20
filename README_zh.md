@@ -73,6 +73,9 @@ anyspecs export
 # 导出所有项目的会话为 HTML (默认到 .anyspecs/ 目录)
 anyspecs export --all-projects --format html
 
+# 仅导出本地时区“今天”的会话
+anyspecs export --now
+
 # 导出指定的会话
 anyspecs export --session-id abc123 --format json
 
@@ -134,6 +137,8 @@ anyspecs upload --hub-type anyspecs --file anyspecs.specs
 anyspecs upload --hub-type anyspecs --file anyspecs.specs --description "My specs"
 # 递归上传目录下所有文件
 anyspecs upload --hub-type anyspecs --dir .anyspecs
+# 上传成功后删除本地文件
+anyspecs upload --hub-type anyspecs --dir .anyspecs --rm
 # 使用自定义服务器
 anyspecs upload --hub-type anyspecs --url http://your-server:3000 --file anyspecs.specs
 ```
@@ -163,6 +168,9 @@ anyspecs upload --hub-type oss --dir
 
 # 递归上传指定导出目录
 anyspecs upload --hub-type oss --dir ./exports
+
+# 上传成功后删除导出文件及其 sidecar
+anyspecs upload --hub-type oss --dir --rm
 ```
 
 OSS 上传规则：
@@ -171,6 +179,7 @@ OSS 上传规则：
 - OSS object key 格式为 `<username>/<YYYY>/<MM>/<DD>/<filename>`
 - 同一个导出文件重复上传会落到同一个 object key，由 OSS 覆盖写实现去重
 - sidecar 中的来源、session、格式、日期等信息会同步写入 OSS object metadata
+- `upload --rm` 只会在上传成功后删除本地文件；`oss` 模式还会一并删除相邻的 `.meta.json` sidecar
 
 ## 🔌 支持的来源
 
