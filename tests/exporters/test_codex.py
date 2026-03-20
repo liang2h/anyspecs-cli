@@ -374,3 +374,82 @@ def test_reports_no_codex_version_info_when_no_sessions_exist(tmp_path, monkeypa
     assert info["has_sessions"] is False
     assert info["detected_versions"] == []
     assert info["unsupported_versions"] == []
+
+
+def test_extracts_project_name_from_windows_cwd_paths(tmp_path, monkeypatch):
+    history_dir = tmp_path / ".codex"
+    project_dir = tmp_path / "workspace" / "demo-app"
+    desktop_session_id = "019d04f1-b713-7701-9c80-a9752539fa70"
+    workspace_session_id = "019d04f1-b713-7701-9c80-a9752539fa71"
+    desktop_session = (
+        history_dir
+        / "sessions"
+        / "2026"
+        / "03"
+        / "20"
+        / f"rollout-2026-03-20T10-00-00-{desktop_session_id}.jsonl"
+    )
+    workspace_session = (
+        history_dir
+        / "sessions"
+        / "2026"
+        / "03"
+        / "20"
+        / f"rollout-2026-03-20T10-05-00-{workspace_session_id}.jsonl"
+    )
+
+    write_jsonl(
+        desktop_session,
+        [
+            {
+                "timestamp": "2026-03-20T02:00:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": desktop_session_id,
+                    "timestamp": "2026-03-20T02:00:00.000Z",
+                    "cwd": r"C:\Users\15257\Desktop\jzx-devops-all",
+                },
+            },
+            {
+                "timestamp": "2026-03-20T02:00:01.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "desktop project"}],
+                },
+            },
+        ],
+    )
+    write_jsonl(
+        workspace_session,
+        [
+            {
+                "timestamp": "2026-03-20T02:05:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": workspace_session_id,
+                    "timestamp": "2026-03-20T02:05:00.000Z",
+                    "cwd": r"C:\workspace\demo-app",
+                },
+            },
+            {
+                "timestamp": "2026-03-20T02:05:01.000Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "workspace project"}],
+                },
+            },
+        ],
+    )
+
+    extractor = make_extractor(history_dir, project_dir, monkeypatch)
+    chats = extractor.extract_chats()
+
+    by_id = {chat["session_id"]: chat for chat in chats}
+    assert by_id[desktop_session_id]["project"]["name"] == "jzx-devops-all"
+    assert by_id[desktop_session_id]["project"]["rootPath"] == r"C:\Users\15257\Desktop\jzx-devops-all"
+    assert by_id[workspace_session_id]["project"]["name"] == "demo-app"
+    assert by_id[workspace_session_id]["project"]["rootPath"] == r"C:\workspace\demo-app"

@@ -11,7 +11,7 @@ import json
 from typing import Dict, Any, List, Optional
 
 from .utils.logging import setup_logging
-from .utils.paths import get_project_name
+from .utils.paths import get_project_name, sanitize_filename_component
 from .config import config
 from .exporters.cursor import CursorExtractor
 from .exporters.claude import ClaudeExtractor
@@ -577,9 +577,18 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         fallback: str = 'unknown',
     ) -> str:
         """Build a stable export filename stem."""
-        session_id = str(chat.get('session_id') or fallback)
-        project_name = chat.get('project', {}).get('name', 'unknown').replace(' ', '_')
-        source = chat.get('source', 'unknown')
+        session_id = sanitize_filename_component(
+            chat.get('session_id'),
+            fallback=fallback,
+        )
+        project_name = sanitize_filename_component(
+            chat.get('project', {}).get('name'),
+            fallback='unknown',
+        )
+        source = sanitize_filename_component(
+            chat.get('source'),
+            fallback='unknown',
+        )
         return f"{source}-chat-{project_name}-{session_id}"
 
     def _upload_command(self, args) -> int:

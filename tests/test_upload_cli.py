@@ -602,6 +602,50 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     assert len(list(tmp_path.glob("*.md"))) == 1
 
 
+def test_build_export_filename_stem_sanitizes_invalid_windows_path_characters():
+    cli = AnySpecsCLI()
+    chat = {
+        "project": {"name": r"C:\Users\15257\Desktop\jzx-devops-all"},
+        "session_id": r"019d0937-0318-7381-99ee-d367e372c34c",
+        "source": "codex",
+    }
+
+    filename_stem = cli._build_export_filename_stem(chat)
+
+    assert filename_stem == (
+        "codex-chat-C_Users_15257_Desktop_jzx-devops-all-"
+        "019d0937-0318-7381-99ee-d367e372c34c"
+    )
+    assert ":" not in filename_stem
+    assert "\\" not in filename_stem
+    assert "/" not in filename_stem
+
+
+def test_export_multiple_with_windows_style_project_name_writes_file(tmp_path):
+    cli = AnySpecsCLI()
+    formatter = cli.formatters["markdown"]
+    args = type("Args", (), {"output": tmp_path})()
+    chat = {
+        "project": {"name": r"C:\Users\15257\Desktop\jzx-devops-all"},
+        "messages": [{"role": "user", "content": "hello"}],
+        "date": 1773878400,
+        "session_id": "019d0937-0318-7381-99ee-d367e372c34c",
+        "source": "codex",
+        "metadata": {},
+    }
+
+    result = cli._export_multiple_chats([chat], formatter, args)
+
+    assert result == 0
+    export_file = (
+        tmp_path
+        / "codex-chat-C_Users_15257_Desktop_jzx-devops-all-019d0937-0318-7381-99ee-d367e372c34c.md"
+    )
+    metadata_file = export_file.with_name(f"{export_file.name}.meta.json")
+    assert export_file.exists()
+    assert metadata_file.exists()
+
+
 def test_export_now_filters_to_today_before_limit(monkeypatch):
     class FixedDateTime(real_datetime.datetime):
         @classmethod
