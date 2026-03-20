@@ -1,3 +1,4 @@
+import datetime as real_datetime
 import json
 from pathlib import Path
 
@@ -26,7 +27,7 @@ class RecordingClient:
         self.calls.append(("upload_file", file_path, description))
         return True
 
-    def upload_directory_anyspecs(self, directory, description=""):
+    def upload_directory_anyspecs(self, directory, description="", on_success=None):
         self.calls.append(("upload_directory_anyspecs", directory, description))
         return {"success": 2, "failed": 0, "skipped": 0}
 
@@ -49,6 +50,7 @@ class RecordingClient:
         description="",
         username="",
         oss_config=None,
+        on_success=None,
     ):
         self.calls.append(
             ("upload_directory_oss", directory, description, username, oss_config)
@@ -137,6 +139,69 @@ def test_anyspecs_dir_without_path_defaults_to_dot_anyspecs(monkeypatch):
     assert exit_code == 0
     client = RecordingClient.instances[0]
     assert ("upload_directory_anyspecs", ".anyspecs", "") in client.calls
+
+
+def test_anyspecs_upload_file_rm_deletes_file_and_sidecar(tmp_path, monkeypatch):
+    upload_file = tmp_path / "demo.txt"
+    upload_file.write_text("hello", encoding="utf-8")
+    sidecar = tmp_path / "demo.txt.meta.json"
+    sidecar.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("ANYSPECS_TOKEN", "env-token")
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.validate_token", lambda self: True)
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.upload_file", lambda self, file_path, description="": True)
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(
+        ["upload", "--hub-type", "anyspecs", "--file", str(upload_file), "--rm"]
+    )
+
+    assert exit_code == 0
+    assert not upload_file.exists()
+    assert not sidecar.exists()
+
+
+def test_anyspecs_upload_dir_rm_only_deletes_successful_uploads(tmp_path, monkeypatch):
+    upload_dir = tmp_path / ".anyspecs"
+    upload_dir.mkdir()
+    ok_file = upload_dir / "ok.md"
+    ok_file.write_text("ok", encoding="utf-8")
+    ok_sidecar = upload_dir / "ok.md.meta.json"
+    ok_sidecar.write_text("{}", encoding="utf-8")
+    failed_file = upload_dir / "failed.md"
+    failed_file.write_text("failed", encoding="utf-8")
+
+    def fake_upload(self, file_path, description=""):
+        return Path(file_path).name != "failed.md"
+
+    monkeypatch.setenv("ANYSPECS_TOKEN", "env-token")
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.validate_token", lambda self: True)
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.upload_file", fake_upload)
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(
+        ["upload", "--hub-type", "anyspecs", "--dir", str(upload_dir), "--rm"]
+    )
+
+    assert exit_code == 0
+    assert not ok_file.exists()
+    assert not ok_sidecar.exists()
+    assert failed_file.exists()
+
+
+def test_anyspecs_upload_search_ignores_rm(monkeypatch):
+    reset_recording_client()
+    monkeypatch.setenv("ANYSPECS_TOKEN", "env-token")
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient", RecordingClient)
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(
+        ["upload", "--hub-type", "anyspecs", "--search", "demo", "--rm"]
+    )
+
+    assert exit_code == 0
+    client = RecordingClient.instances[0]
+    assert ("list_files", 0, "demo") in client.calls
 
 
 def test_oss_upload_requires_username(tmp_path, monkeypatch, capsys):
@@ -266,6 +331,112 @@ def test_oss_directory_upload_only_processes_files_with_sidecars(tmp_path, monke
             {"bucket": "demo-bucket"},
         )
     ]
+
+
+def test_oss_upload_file_rm_deletes_file_and_sidecar(tmp_path, monkeypatch):
+    upload_file = tmp_path / "chat.md"
+    upload_file.write_text("hello", encoding="utf-8")
+    sidecar = tmp_path / "chat.md.meta.json"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "source": "codex",
+                "session_id": "abc123",
+                "format": "markdown",
+                "chat_date": "2026/03/19",
+                "dedupe_key": "codex:abc123:markdown",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("ANYSPECS_UPLOAD_USERNAME", "liang2h")
+    monkeypatch.setenv("OSS_BUCKET", "demo-bucket")
+    monkeypatch.setenv("OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
+    monkeypatch.setenv("OSS_ACCESS_KEY_ID", "key-id")
+    monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "key-secret")
+    monkeypatch.setattr(
+        "anyspecs.cli.AnySpecsUploadClient.upload_exported_file",
+        lambda self, file_path, metadata=None, description="", username="", oss_config=None: True,
+    )
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(["upload", "--hub-type", "oss", "--file", str(upload_file), "--rm"])
+
+    assert exit_code == 0
+    assert not upload_file.exists()
+    assert not sidecar.exists()
+
+
+def test_oss_upload_dir_rm_deletes_uploaded_exports_only(tmp_path, monkeypatch):
+    upload_dir = tmp_path / ".anyspecs"
+    upload_dir.mkdir()
+    good_file = upload_dir / "good.md"
+    good_file.write_text("good", encoding="utf-8")
+    good_sidecar = upload_dir / "good.md.meta.json"
+    good_sidecar.write_text(
+        json.dumps(
+            {
+                "source": "claude",
+                "session_id": "session-1",
+                "format": "markdown",
+                "chat_date": "2026/03/19",
+                "dedupe_key": "claude:session-1:markdown",
+            }
+        ),
+        encoding="utf-8",
+    )
+    orphan_file = upload_dir / "orphan.md"
+    orphan_file.write_text("orphan", encoding="utf-8")
+    bare_sidecar = upload_dir / "bare.meta.json"
+    bare_sidecar.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("ANYSPECS_UPLOAD_USERNAME", "liang2h")
+    monkeypatch.setenv("OSS_BUCKET", "demo-bucket")
+    monkeypatch.setenv("OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
+    monkeypatch.setenv("OSS_ACCESS_KEY_ID", "key-id")
+    monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "key-secret")
+    monkeypatch.setattr(
+        "anyspecs.cli.AnySpecsUploadClient.upload_exported_file",
+        lambda self, file_path, metadata=None, description="", username="", oss_config=None: True,
+    )
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(["upload", "--hub-type", "oss", "--dir", str(upload_dir), "--rm"])
+
+    assert exit_code == 0
+    assert not good_file.exists()
+    assert not good_sidecar.exists()
+    assert orphan_file.exists()
+    assert bare_sidecar.exists()
+
+
+def test_upload_rm_warns_on_cleanup_failure_but_keeps_success_exit_code(tmp_path, monkeypatch, capsys):
+    upload_file = tmp_path / "demo.txt"
+    upload_file.write_text("hello", encoding="utf-8")
+    sidecar = tmp_path / "demo.txt.meta.json"
+    sidecar.write_text("{}", encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def fake_unlink(self, *args, **kwargs):
+        if self == upload_file:
+            raise PermissionError("denied")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setenv("ANYSPECS_TOKEN", "env-token")
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.validate_token", lambda self: True)
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient.upload_file", lambda self, file_path, description="": True)
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(
+        ["upload", "--hub-type", "anyspecs", "--file", str(upload_file), "--rm"]
+    )
+
+    assert exit_code == 0
+    assert upload_file.exists()
+    assert not sidecar.exists()
+    assert "Failed to remove local file after upload" in capsys.readouterr().out
 
 
 def test_oss_upload_requires_bucket_configuration(tmp_path, monkeypatch, capsys):
@@ -429,3 +600,92 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     assert metadata["dedupe_key"] == "codex:session-12345678:markdown"
     assert metadata["chat_date"] == "2026/03/19"
     assert len(list(tmp_path.glob("*.md"))) == 1
+
+
+def test_export_now_filters_to_today_before_limit(monkeypatch):
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is not None:
+                return real_datetime.datetime(2026, 3, 20, 9, 0, tzinfo=tz)
+            return cls(2026, 3, 20, 9, 0)
+
+    monkeypatch.setattr("anyspecs.cli.datetime.datetime", FixedDateTime)
+
+    cli = AnySpecsCLI()
+    args = type(
+        "Args",
+        (),
+        {
+            "session_id": None,
+            "project": None,
+            "all_projects": True,
+            "limit": 1,
+            "now": True,
+        },
+    )()
+    chats = [
+        {"session_id": "yesterday", "project": {"name": "demo"}, "date": "2026-03-19T23:59:59"},
+        {"session_id": "today-1", "project": {"name": "demo"}, "date": "2026-03-20T00:00:00"},
+        {"session_id": "today-2", "project": {"name": "demo"}, "date": "2026-03-20T12:30:00"},
+    ]
+
+    filtered = cli._apply_filters(chats, args)
+
+    assert [chat["session_id"] for chat in filtered] == ["today-1"]
+
+
+def test_export_now_excludes_unparseable_dates(monkeypatch):
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is not None:
+                return real_datetime.datetime(2026, 3, 20, 9, 0, tzinfo=tz)
+            return cls(2026, 3, 20, 9, 0)
+
+    monkeypatch.setattr("anyspecs.cli.datetime.datetime", FixedDateTime)
+
+    cli = AnySpecsCLI()
+    cli.logger = type("Logger", (), {"debug": lambda *args, **kwargs: None})()
+    args = type(
+        "Args",
+        (),
+        {
+            "session_id": None,
+            "project": None,
+            "all_projects": True,
+            "limit": None,
+            "now": True,
+        },
+    )()
+    chats = [
+        {"session_id": "bad", "project": {"name": "demo"}, "date": "not-a-date"},
+        {"session_id": "good", "project": {"name": "demo"}, "date": "2026-03-20T08:00:00+08:00"},
+    ]
+
+    filtered = cli._apply_filters(chats, args)
+
+    assert [chat["session_id"] for chat in filtered] == ["good"]
+
+
+def test_export_without_now_keeps_existing_filter_behavior():
+    cli = AnySpecsCLI()
+    args = type(
+        "Args",
+        (),
+        {
+            "session_id": None,
+            "project": None,
+            "all_projects": True,
+            "limit": None,
+            "now": False,
+        },
+    )()
+    chats = [
+        {"session_id": "bad", "project": {"name": "demo"}, "date": "not-a-date"},
+        {"session_id": "good", "project": {"name": "demo"}, "date": 1773878400},
+    ]
+
+    filtered = cli._apply_filters(chats, args)
+
+    assert [chat["session_id"] for chat in filtered] == ["bad", "good"]
