@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
 from .logging import get_logger
+from .paths import sanitize_filename_component
 
 logger = get_logger('specs_formatter')
 
@@ -75,21 +76,7 @@ class SpecsFormatter:
     
     def _sanitize_filename(self, name: str) -> str:
         """Sanitize filename by removing invalid characters."""
-        
-        if not name or not isinstance(name, str):
-            return "未命名"
-        
-        return (name
-                # Keep Chinese, English, numbers, underscore, hyphen, space
-                .replace('/', '_').replace('\\', '_').replace(':', '_')
-                .replace('*', '_').replace('?', '_').replace('"', '_')
-                .replace('<', '_').replace('>', '_').replace('|', '_')
-                # Replace multiple spaces/special chars with single underscore
-                .replace(' ', '_')
-                # Remove leading/trailing underscores
-                .strip('_')
-                # Limit length
-                [:30])
+        return sanitize_filename_component(name, fallback="未命名", max_length=30)
     
     def save_specs_file(self, specs_data: Dict[str, Any], file_path: Path) -> bool:
         """Save specs data to file."""

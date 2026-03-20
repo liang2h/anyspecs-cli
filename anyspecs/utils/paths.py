@@ -5,6 +5,7 @@ Path utilities and project name extraction.
 import os
 import platform
 import pathlib
+import re
 from typing import Optional
 
 
@@ -32,6 +33,31 @@ def normalize_path(path: str) -> pathlib.Path:
 def get_home_directory() -> pathlib.Path:
     """Get the user's home directory."""
     return pathlib.Path.home()
+
+
+def sanitize_filename_component(
+    value: Optional[str],
+    fallback: str = "unknown",
+    max_length: Optional[int] = None,
+) -> str:
+    """Sanitize a filename component for cross-platform safety."""
+    if value is None:
+        cleaned = ""
+    else:
+        cleaned = str(value).strip()
+
+    cleaned = re.sub(r'[<>:"/\\|?*]+', "_", cleaned)
+    cleaned = re.sub(r"\s+", "_", cleaned)
+    cleaned = re.sub(r"_+", "_", cleaned)
+    cleaned = cleaned.strip(" ._")
+
+    if not cleaned:
+        cleaned = fallback
+
+    if max_length is not None:
+        cleaned = cleaned[:max_length].rstrip(" ._") or fallback
+
+    return cleaned
 
 
 def get_cursor_root() -> pathlib.Path:
@@ -68,8 +94,10 @@ def extract_project_name_from_path(root_path: str, debug: bool = False) -> str:
     """Extract a project name from a path, skipping user directories."""
     if not root_path or root_path == '/':
         return "Root"
-        
-    path_parts = [p for p in root_path.split('/') if p]
+
+    normalized_path = re.sub(r"[\\/]+", "/", str(root_path).strip())
+    normalized_path = re.sub(r"^[A-Za-z]:", "", normalized_path)
+    path_parts = [p for p in normalized_path.split('/') if p and p != '.']
     
     # Skip common user directory patterns
     project_name = None
@@ -86,9 +114,8 @@ def extract_project_name_from_path(root_path: str, debug: bool = False) -> str:
             break
     
     # If this is just /Users/username with no deeper path, don't use username as project
-    if username_index >= 0 and username_index < len(path_parts) and path_parts[username_index] == current_username:
-        if len(path_parts) <= username_index + 1:
-            return "Home Directory"
+    if username_index >= 0 and len(path_parts) <= username_index + 1:
+        return "Home Directory"
     
     if username_index >= 0 and username_index + 1 < len(path_parts):
         # First try specific project directories we know about by name
@@ -120,7 +147,10 @@ def extract_project_name_from_path(root_path: str, debug: bool = False) -> str:
             project_name = 'Home Directory'
         
         # Skip common project container directories
-        project_containers = ['Documents', 'Projects', 'Code', 'workspace', 'repos', 'git', 'src', 'codebase']
+        project_containers = [
+            'Documents', 'Desktop', 'Downloads', 'Projects', 'Code', 'workspace',
+            'repos', 'git', 'src', 'codebase'
+        ]
         if project_name in project_containers:
             # Don't use container directories as project names
             # Try to use the next component if available
