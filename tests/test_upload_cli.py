@@ -38,9 +38,18 @@ class RecordingClient:
         description="",
         username="",
         oss_config=None,
+        date_format="yyyy-mm-dd",
     ):
         self.calls.append(
-            ("upload_exported_file", file_path, metadata, description, username, oss_config)
+            (
+                "upload_exported_file",
+                file_path,
+                metadata,
+                description,
+                username,
+                oss_config,
+                date_format,
+            )
         )
         return True
 
@@ -50,10 +59,18 @@ class RecordingClient:
         description="",
         username="",
         oss_config=None,
+        date_format="yyyy-mm-dd",
         on_success=None,
     ):
         self.calls.append(
-            ("upload_directory_oss", directory, description, username, oss_config)
+            (
+                "upload_directory_oss",
+                directory,
+                description,
+                username,
+                oss_config,
+                date_format,
+            )
         )
         return {"success": 1, "failed": 0, "skipped": 1}
 
@@ -72,6 +89,15 @@ def test_upload_parser_rejects_file_and_dir_together():
 
     with pytest.raises(SystemExit):
         parser.parse_args(["upload", "--file", "a.txt", "--dir"])
+
+
+def test_upload_parser_defaults_date_format_to_yyyy_mm_dd():
+    cli = AnySpecsCLI()
+    parser = cli._create_parser()
+
+    args = parser.parse_args(["upload", "--hub-type", "oss", "--file", "a.txt"])
+
+    assert args.date_format == "yyyy-mm-dd"
 
 
 def test_anyspecs_upload_uses_cli_url_before_env(tmp_path, monkeypatch):
@@ -277,6 +303,40 @@ def test_oss_upload_ignores_url_and_token_and_uses_username(tmp_path, monkeypatc
             "access_key_secret": "key-secret",
             "public_base_url": None,
         },
+        "yyyy-mm-dd",
+    ) in client.calls
+
+
+def test_oss_upload_dir_passes_explicit_date_format(monkeypatch):
+    reset_recording_client()
+    monkeypatch.setenv("ANYSPECS_UPLOAD_USERNAME", "liang2h")
+    monkeypatch.setenv("OSS_BUCKET", "demo-bucket")
+    monkeypatch.setenv("OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
+    monkeypatch.setenv("OSS_ACCESS_KEY_ID", "key-id")
+    monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "key-secret")
+    monkeypatch.setattr("anyspecs.cli.AnySpecsUploadClient", RecordingClient)
+
+    cli = AnySpecsCLI()
+    exit_code = cli.run(
+        ["upload", "--hub-type", "oss", "--dir", "--date-format", "yyyy/mm/dd"]
+    )
+
+    assert exit_code == 0
+    client = RecordingClient.instances[0]
+    assert (
+        "upload_directory_oss",
+        ".anyspecs",
+        "",
+        "liang2h",
+        {
+            "bucket": "demo-bucket",
+            "endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "region": None,
+            "access_key_id": "key-id",
+            "access_key_secret": "key-secret",
+            "public_base_url": None,
+        },
+        "yyyy/mm/dd",
     ) in client.calls
 
 
@@ -302,8 +362,15 @@ def test_oss_directory_upload_only_processes_files_with_sidecars(tmp_path, monke
     client = AnySpecsUploadClient()
     uploaded = []
 
-    def fake_upload(file_path, metadata=None, description="", username="", oss_config=None):
-        uploaded.append((file_path, metadata, description, username, oss_config))
+    def fake_upload(
+        file_path,
+        metadata=None,
+        description="",
+        username="",
+        oss_config=None,
+        date_format="yyyy-mm-dd",
+    ):
+        uploaded.append((file_path, metadata, description, username, oss_config, date_format))
         return True
 
     monkeypatch.setattr(client, "upload_exported_file", fake_upload)
@@ -329,6 +396,7 @@ def test_oss_directory_upload_only_processes_files_with_sidecars(tmp_path, monke
             "desc",
             "liang2h",
             {"bucket": "demo-bucket"},
+            "yyyy-mm-dd",
         )
     ]
 
@@ -357,7 +425,7 @@ def test_oss_upload_file_rm_deletes_file_and_sidecar(tmp_path, monkeypatch):
     monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "key-secret")
     monkeypatch.setattr(
         "anyspecs.cli.AnySpecsUploadClient.upload_exported_file",
-        lambda self, file_path, metadata=None, description="", username="", oss_config=None: True,
+        lambda self, file_path, metadata=None, description="", username="", oss_config=None, date_format="yyyy-mm-dd": True,
     )
 
     cli = AnySpecsCLI()
@@ -398,7 +466,7 @@ def test_oss_upload_dir_rm_deletes_uploaded_exports_only(tmp_path, monkeypatch):
     monkeypatch.setenv("OSS_ACCESS_KEY_SECRET", "key-secret")
     monkeypatch.setattr(
         "anyspecs.cli.AnySpecsUploadClient.upload_exported_file",
-        lambda self, file_path, metadata=None, description="", username="", oss_config=None: True,
+        lambda self, file_path, metadata=None, description="", username="", oss_config=None, date_format="yyyy-mm-dd": True,
     )
 
     cli = AnySpecsCLI()
@@ -513,6 +581,64 @@ def test_upload_exported_file_to_oss_uses_object_key_and_headers(tmp_path, monke
     assert ok is True
     assert bucket_calls == [
         (
+            "liang2h/2026-03-19/chat.md",
+            str(export_file),
+            {
+                "x-oss-meta-source": "claude",
+                "x-oss-meta-session-id": "session-1",
+                "x-oss-meta-format": "markdown",
+                "x-oss-meta-chat-date": "2026-03-19",
+                "x-oss-meta-dedupe-key": "claude:session-1:markdown",
+                "x-oss-meta-description": "demo",
+                "Content-Type": "text/markdown",
+            },
+            None,
+        )
+    ]
+
+
+def test_upload_exported_file_to_oss_supports_slash_date_format(tmp_path, monkeypatch):
+    export_file = tmp_path / "chat.md"
+    export_file.write_text("hello", encoding="utf-8")
+
+    bucket_calls = []
+
+    class FakeBucket:
+        bucket_name = "demo-bucket"
+
+        def put_object_from_file(self, key, filename, headers=None, progress_callback=None):
+            bucket_calls.append((key, filename, headers, progress_callback))
+
+    monkeypatch.setattr(
+        AnySpecsUploadClient,
+        "_create_oss_bucket",
+        staticmethod(lambda oss_config: FakeBucket()),
+    )
+
+    client = AnySpecsUploadClient()
+    ok = client.upload_exported_file(
+        str(export_file),
+        metadata={
+            "source": "claude",
+            "session_id": "session-1",
+            "format": "markdown",
+            "chat_date": "2026-03-19",
+            "dedupe_key": "claude:session-1:markdown",
+        },
+        description="demo",
+        username="liang2h",
+        oss_config={
+            "bucket": "demo-bucket",
+            "endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "access_key_id": "key-id",
+            "access_key_secret": "key-secret",
+        },
+        date_format="yyyy/mm/dd",
+    )
+
+    assert ok is True
+    assert bucket_calls == [
+        (
             "liang2h/2026/03/19/chat.md",
             str(export_file),
             {
@@ -520,6 +646,69 @@ def test_upload_exported_file_to_oss_uses_object_key_and_headers(tmp_path, monke
                 "x-oss-meta-session-id": "session-1",
                 "x-oss-meta-format": "markdown",
                 "x-oss-meta-chat-date": "2026/03/19",
+                "x-oss-meta-dedupe-key": "claude:session-1:markdown",
+                "x-oss-meta-description": "demo",
+                "Content-Type": "text/markdown",
+            },
+            None,
+        )
+    ]
+
+
+def test_upload_exported_file_to_oss_falls_back_to_current_utc_date(tmp_path, monkeypatch):
+    export_file = tmp_path / "chat.md"
+    export_file.write_text("hello", encoding="utf-8")
+
+    bucket_calls = []
+
+    class FakeBucket:
+        bucket_name = "demo-bucket"
+
+        def put_object_from_file(self, key, filename, headers=None, progress_callback=None):
+            bucket_calls.append((key, filename, headers, progress_callback))
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime.datetime(2026, 3, 20, 9, 0, tzinfo=tz)
+
+    monkeypatch.setattr(
+        AnySpecsUploadClient,
+        "_create_oss_bucket",
+        staticmethod(lambda oss_config: FakeBucket()),
+    )
+    monkeypatch.setattr("anyspecs.utils.uploader.datetime", FixedDateTime)
+
+    client = AnySpecsUploadClient()
+    ok = client.upload_exported_file(
+        str(export_file),
+        metadata={
+            "source": "claude",
+            "session_id": "session-1",
+            "format": "markdown",
+            "chat_date": "not-a-date",
+            "dedupe_key": "claude:session-1:markdown",
+        },
+        description="demo",
+        username="liang2h",
+        oss_config={
+            "bucket": "demo-bucket",
+            "endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "access_key_id": "key-id",
+            "access_key_secret": "key-secret",
+        },
+    )
+
+    assert ok is True
+    assert bucket_calls == [
+        (
+            "liang2h/2026-03-20/chat.md",
+            str(export_file),
+            {
+                "x-oss-meta-source": "claude",
+                "x-oss-meta-session-id": "session-1",
+                "x-oss-meta-format": "markdown",
+                "x-oss-meta-chat-date": "2026-03-20",
                 "x-oss-meta-dedupe-key": "claude:session-1:markdown",
                 "x-oss-meta-description": "demo",
                 "Content-Type": "text/markdown",
