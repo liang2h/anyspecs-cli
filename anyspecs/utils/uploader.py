@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import requests
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -16,6 +16,10 @@ class AnySpecsUploadClient:
     """AnySpecs file upload client"""
 
     DEFAULT_BASE_URL = "https://hub.anyspecs.cn/"
+    OSS_DATE_FORMATS = {
+        "yyyy-mm-dd": "%Y-%m-%d",
+        "yyyy/mm/dd": "%Y/%m/%d",
+    }
 
     def __init__(
         self,
@@ -164,6 +168,7 @@ class AnySpecsUploadClient:
         description: str = "",
         username: str = "",
         oss_config: Optional[Dict[str, Any]] = None,
+        date_format: str = "yyyy-mm-dd",
     ) -> bool:
         p = self._validate_local_file(file_path)
         if p is None:
@@ -186,8 +191,9 @@ class AnySpecsUploadClient:
 
         try:
             bucket = self._create_oss_bucket(oss_config or {})
-            object_key = self._build_oss_object_key(p, metadata, username)
-            headers = self._build_oss_headers(metadata, description, p)
+            normalized_metadata = self._normalize_oss_metadata_date(metadata, date_format)
+            object_key = self._build_oss_object_key(p, normalized_metadata, username)
+            headers = self._build_oss_headers(normalized_metadata, description, p)
             bucket.put_object_from_file(object_key, str(p), headers=headers)
             print("✅ Export file upload successful!")
             print(f"   OSS Path: {bucket.bucket_name}/{object_key}")
@@ -219,6 +225,7 @@ class AnySpecsUploadClient:
         description: str = "",
         username: str = "",
         oss_config: Optional[Dict[str, Any]] = None,
+        date_format: str = "yyyy-mm-dd",
         on_success: Optional[Callable[[Path], None]] = None,
     ) -> Dict[str, int]:
         files = self.iter_files(directory)
@@ -240,6 +247,7 @@ class AnySpecsUploadClient:
                 description=description,
                 username=username,
                 oss_config=oss_config,
+                date_format=date_format,
             ):
                 summary["success"] += 1
                 if on_success:
@@ -303,6 +311,46 @@ class AnySpecsUploadClient:
             headers["Content-Type"] = content_type
         return headers
 
+    @classmethod
+    def _normalize_oss_metadata_date(
+        cls,
+        metadata: Dict[str, Any],
+        date_format: str,
+    ) -> Dict[str, Any]:
+        normalized_metadata = dict(metadata)
+        normalized_metadata["chat_date"] = cls._format_oss_chat_date(
+            normalized_metadata.get("chat_date"),
+            date_format,
+        )
+        return normalized_metadata
+
+    @classmethod
+    def _format_oss_chat_date(cls, raw_value: Any, date_format: str) -> str:
+        date_obj = cls._parse_oss_chat_date(raw_value)
+        if date_obj is None:
+            date_obj = datetime.now(timezone.utc).date()
+        return date_obj.strftime(cls.OSS_DATE_FORMATS.get(date_format, "%Y-%m-%d"))
+
+    @staticmethod
+    def _parse_oss_chat_date(raw_value: Any) -> Optional[date]:
+        if not raw_value:
+            return None
+
+        if isinstance(raw_value, datetime):
+            return raw_value.date()
+
+        raw_text = str(raw_value).strip()
+        if not raw_text:
+            return None
+
+        for pattern in ("%Y/%m/%d", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(raw_text, pattern).date()
+            except ValueError:
+                continue
+
+        return None
+
     @staticmethod
     def _build_oss_object_key(
         file_path: Path,
@@ -313,7 +361,10 @@ class AnySpecsUploadClient:
         if chat_date:
             date_part = chat_date
         else:
-            date_part = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+            date_part = AnySpecsUploadClient._format_oss_chat_date(
+                None,
+                "yyyy-mm-dd",
+            )
         return f"{username}/{date_part}/{file_path.name}"
 
     @staticmethod

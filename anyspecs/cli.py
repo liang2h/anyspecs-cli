@@ -205,6 +205,10 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         upload_parser.add_argument('--page', type=int, default=0, help='Page number (starting from 0)')
         upload_parser.add_argument('--rm', action='store_true',
                                    help='Remove local files after successful upload')
+        upload_parser.add_argument('--date-format',
+                                   choices=['yyyy-mm-dd', 'yyyy/mm/dd'],
+                                   default='yyyy-mm-dd',
+                                   help='Date format for OSS upload paths and metadata (default: yyyy-mm-dd)')
         upload_parser.add_argument('--http', action='store_true', help='Force use HTTP instead of HTTPS for testing')
         upload_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
 
@@ -691,6 +695,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
                 description=args.description,
                 username=username,
                 oss_config=oss_config,
+                date_format=args.date_format,
             )
             if success and args.rm:
                 self._cleanup_uploaded_path(args.file, include_sidecar=True)
@@ -704,6 +709,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             description=args.description,
             username=username,
             oss_config=oss_config,
+            date_format=args.date_format,
             on_success=on_success,
         )
         self._print_upload_summary(args.dir, summary)

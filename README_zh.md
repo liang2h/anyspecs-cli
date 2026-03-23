@@ -163,6 +163,9 @@ export OSS_ACCESS_KEY_SECRET="your-sk"
 # 上传单个导出文件
 anyspecs upload --hub-type oss --file .anyspecs/chat.md
 
+# 使用斜杠日期目录上传
+anyspecs upload --hub-type oss --file .anyspecs/chat.md --date-format yyyy/mm/dd
+
 # 递归上传默认导出目录
 anyspecs upload --hub-type oss --dir
 
@@ -176,9 +179,10 @@ anyspecs upload --hub-type oss --dir --rm
 OSS 上传规则：
 
 - `oss` 模式只会上传旁边有 `.meta.json` sidecar 的导出文件
-- OSS object key 格式为 `<username>/<YYYY>/<MM>/<DD>/<filename>`
+- `--date-format` 支持 `yyyy-mm-dd` 和 `yyyy/mm/dd`，默认 `yyyy-mm-dd`
+- OSS object key 格式为 `<username>/<date>/<filename>`，例如 `<username>/2026-03-19/chat.md`
 - 同一个导出文件重复上传会落到同一个 object key，由 OSS 覆盖写实现去重
-- sidecar 中的来源、session、格式、日期等信息会同步写入 OSS object metadata
+- sidecar 中的来源、session、格式、日期等信息会同步写入 OSS object metadata，且上传时 `x-oss-meta-chat-date` 会使用所选日期格式
 - `upload --rm` 只会在上传成功后删除本地文件；`oss` 模式还会一并删除相邻的 `.meta.json` sidecar
 
 ## 🔌 支持的来源

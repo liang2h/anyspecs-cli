@@ -159,6 +159,9 @@ export OSS_ACCESS_KEY_SECRET="your-sk"
 # Upload one exported file
 anyspecs upload --hub-type oss --file .anyspecs/chat.md
 
+# Upload using slash-separated OSS date directories
+anyspecs upload --hub-type oss --file .anyspecs/chat.md --date-format yyyy/mm/dd
+
 # Upload the default export directory recursively
 anyspecs upload --hub-type oss --dir
 
@@ -172,9 +175,10 @@ anyspecs upload --hub-type oss --dir ./exports
 OSS upload rules:
 
 - Only exported files with a neighboring `.meta.json` sidecar are uploaded in `oss` mode
-- Object key format is `<username>/<YYYY>/<MM>/<DD>/<filename>`
+- `--date-format` supports `yyyy-mm-dd` and `yyyy/mm/dd`; default is `yyyy-mm-dd`
+- Object key format is `<username>/<date>/<filename>`, for example `<username>/2026-03-19/chat.md`
 - Re-uploading the same exported file writes to the same OSS object key, so OSS overwrite behavior handles deduplication
-- Sidecar metadata is also written to OSS object metadata for traceability
+- Sidecar metadata is also written to OSS object metadata for traceability, and `x-oss-meta-chat-date` uses the selected date format during upload
 - `upload --rm` removes local files only after a successful upload; in `oss` mode it also removes the neighboring `.meta.json` sidecar
 
 ### More Functions
