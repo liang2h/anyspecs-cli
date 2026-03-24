@@ -34,6 +34,7 @@ dependencies = [
     "python-dateutil>=2.8.0",
     "pathlib2>=2.3.0",
     "oss2>=2.19.1",
+    "protobuf>=5.0.0",
 ]
 
 [project.optional-dependencies]

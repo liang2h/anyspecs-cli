@@ -7,6 +7,7 @@ from .claude import ClaudeExtractor
 from .kiro import KiroExtractor
 from .augment import AugmentExtractor
 from .opencode import OpenCodeExtractor
+from .windsurf import WindsurfExtractor
 
 __all__ = [
     "CursorExtractor",
@@ -14,4 +15,5 @@ __all__ = [
     "KiroExtractor",
     "AugmentExtractor",
     "OpenCodeExtractor",
+    "WindsurfExtractor",
 ]

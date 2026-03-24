@@ -36,6 +36,9 @@ class Config:
                 },
                 'claude': {
                     'enabled': True
+                },
+                'windsurf': {
+                    'enabled': True
                 }
             },
             'server': {

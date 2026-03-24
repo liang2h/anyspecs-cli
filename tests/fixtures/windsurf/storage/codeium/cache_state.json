@@ -1,0 +1,85 @@
+{
+  "workspaces": [
+    {
+      "workspace_id": "359c582b8bf0e42edf8be0b6be435fa6",
+      "trajectory_summaries": {
+        "cbc99144-4e48-4e68-89f7-3f1608611bbe": {
+          "summary": "Project Overview",
+          "stepCount": 14,
+          "lastModifiedTime": "2026-03-24T10:24:56.931941Z",
+          "trajectoryId": "b09b94bf-6123-4e79-9208-3ae02a487b17",
+          "status": "CASCADE_RUN_STATUS_IDLE",
+          "createdTime": "2026-03-24T10:24:47.599492Z",
+          "workspaces": [
+            {
+              "workspaceFolderAbsoluteUri": "file:///Users/redacted/work/sample/code/demo-learning-platform",
+              "gitRootAbsoluteUri": "file:///Users/redacted/work/sample/code/demo-learning-platform",
+              "repository": {
+                "computedName": "redacted/demo-learning-platform",
+                "gitOriginUrl": "git@redacted.example:demo-learning-platform.git"
+              },
+              "branchName": "master"
+            }
+          ],
+          "lastUserInputTime": "2026-03-24T10:24:47.633874Z",
+          "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+          "lastGeneratorModelUid": "MODEL_SWE_1_5_SLOW"
+        }
+      },
+      "active_trajectory": {
+        "cascadeId": "cbc99144-4e48-4e68-89f7-3f1608611bbe",
+        "trajectory": {
+          "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+          "steps": [
+            {
+              "type": "CORTEX_STEP_TYPE_USER_INPUT",
+              "status": "CORTEX_STEP_STATUS_DONE",
+              "metadata": {
+                "createdAt": "2026-03-24T10:24:47.633874Z",
+                "source": "CORTEX_STEP_SOURCE_USER_EXPLICIT"
+              },
+              "userInput": {
+                "userResponse": "介绍下项目概况",
+                "items": [
+                  {
+                    "text": "介绍下项目概况"
+                  }
+                ],
+                "activeUserState": {}
+              }
+            },
+            {
+              "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+              "status": "CORTEX_STEP_STATUS_DONE",
+              "metadata": {
+                "createdAt": "2026-03-24T10:24:47.843021Z",
+                "viewableAt": "2026-03-24T10:24:48.654318Z",
+                "completedAt": "2026-03-24T10:24:48.969050Z",
+                "source": "CORTEX_STEP_SOURCE_MODEL"
+              },
+              "plannerResponse": {
+                "response": "\n\nI'll analyze the project structure to provide you with an overview. Let me start by exploring the workspace.\n",
+                "modifiedResponse": "I'll analyze the project structure to provide you with an overview. Let me start by exploring the workspace."
+              }
+            },
+            {
+              "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+              "status": "CORTEX_STEP_STATUS_DONE",
+              "metadata": {
+                "createdAt": "2026-03-24T10:24:52.966811Z",
+                "viewableAt": "2026-03-24T10:24:53.703609Z",
+                "completedAt": "2026-03-24T10:24:56.931941Z",
+                "source": "CORTEX_STEP_SOURCE_MODEL"
+              },
+              "plannerResponse": {
+                "response": "\n\n# 项目概况\n\n**demo-learning-platform** 是一个智能学习平台项目，基于Spring Boot 3.0开发的多模块Maven项目。\n\n## 技术栈\n- **Java版本**: Java 17\n- **框架**: Spring Boot 3.0.13\n- **数据库**: MySQL 8.0.33 + MyBatis Plus 3.5.5\n- **缓存**: Redis + Redisson\n- **消息队列**: RocketMQ\n- **微服务**: Dubbo 3.2.10\n- **AI集成**: 支持多种模型服务接入\n\n## 模块结构\n- **platform-web**: Web层，提供HTTP接口\n- **platform-api**: API接口定义\n- **platform-service**: 业务逻辑层\n- **platform-manager**: 管理层\n- **platform-dao**: 数据访问层\n- **platform-common**: 公共组件\n",
+                "modifiedResponse": "# 项目概况\n\n**demo-learning-platform** 是一个智能学习平台项目，基于Spring Boot 3.0开发的多模块Maven项目。\n\n## 技术栈\n- **Java版本**: Java 17\n- **框架**: Spring Boot 3.0.13\n- **数据库**: MySQL 8.0.33 + MyBatis Plus 3.5.5\n- **缓存**: Redis + Redisson\n- **消息队列**: RocketMQ\n- **微服务**: Dubbo 3.2.10\n- **AI集成**: 支持多种模型服务接入\n\n## 模块结构\n- **platform-web**: Web层，提供HTTP接口\n- **platform-api**: API接口定义\n- **platform-service**: 业务逻辑层\n- **platform-manager**: 管理层\n- **platform-dao**: 数据访问层\n- **platform-common**: 公共组件"
+              }
+            }
+          ]
+        },
+        "status": "CASCADE_RUN_STATUS_IDLE"
+      }
+    }
+  ]
+}

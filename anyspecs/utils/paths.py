@@ -75,6 +75,26 @@ def get_cursor_root() -> pathlib.Path:
         raise RuntimeError(f"Unsupported OS: {system}")
 
 
+def get_windsurf_app_root() -> pathlib.Path:
+    """Get the Windsurf application data root directory."""
+    home = pathlib.Path.home()
+    system = platform.system()
+
+    if system == "Darwin":
+        return home / "Library" / "Application Support" / "Windsurf"
+    elif system == "Windows":
+        return home / "AppData" / "Roaming" / "Windsurf"
+    elif system == "Linux":
+        return home / ".config" / "Windsurf"
+    else:
+        raise RuntimeError(f"Unsupported OS: {system}")
+
+
+def get_windsurf_storage_root() -> pathlib.Path:
+    """Get the Windsurf local Codeium storage root directory."""
+    return pathlib.Path.home() / ".codeium" / "windsurf"
+
+
 def get_claude_history_path(project_path: Optional[str] = None) -> pathlib.Path:
     """Get the Claude Code history path for a project."""
     if project_path is None:
