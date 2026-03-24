@@ -1,0 +1,18 @@
+{
+  "id": "prt_c0868c6850033l8j22tA97CdxN",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c0868c685001lO8Y5NFX1vO5Tj",
+  "type": "file",
+  "mime": "text/plain",
+  "filename": "sample/grpc/背景.md",
+  "url": "file:///Users/redacted/work/project/sample-app/sample/grpc/背景.md",
+  "source": {
+    "text": {
+      "value": "@sample/grpc/背景.md",
+      "start": 55,
+      "end": 75
+    },
+    "type": "file",
+    "path": "sample/grpc/背景.md"
+  }
+}

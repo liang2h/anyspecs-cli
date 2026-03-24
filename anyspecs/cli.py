@@ -18,6 +18,7 @@ from .exporters.claude import ClaudeExtractor
 from .exporters.kiro import KiroExtractor
 from .exporters.augment import AugmentExtractor
 from .exporters.codex import CodexExtractor
+from .exporters.opencode import OpenCodeExtractor
 from .core.formatters import JSONFormatter, MarkdownFormatter, HTMLFormatter
 from . import __version__
 from .utils.uploader import AnySpecsUploadClient
@@ -32,7 +33,8 @@ class AnySpecsCLI:
             'claude': ClaudeExtractor(),
             'kiro': KiroExtractor(),
             'augment': AugmentExtractor(),
-            'codex': CodexExtractor()
+            'codex': CodexExtractor(),
+            'opencode': OpenCodeExtractor(),
         }
         self.formatters = {
             'json': JSONFormatter(),
@@ -86,7 +88,7 @@ class AnySpecsCLI:
             epilog="""
 Examples:
   %(prog)s list                                    # List all chat sessions from all sources
-  %(prog)s list --source cursor                   # List only Cursor sessions(Also works for augment, claude code, kiro and codex)
+  %(prog)s list --source cursor                   # List only Cursor sessions(Also works for augment, claude code, kiro, codex and opencode)
   %(prog)s export --source claude --format json   # Export Claude sessions as json to .anyspecs/ Default is markdown
   %(prog)s export --session-id abc123 --format html --output chat.html # Export a specific session as html to chat.html
   %(prog)s setup kimi                             # Configure Kimi API key and model  
@@ -118,7 +120,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # list command
         list_parser = subparsers.add_parser('list', help='List all chat sessions')
         list_parser.add_argument('--source', '-s', 
-                               choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'all'], 
+                               choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'all'], 
                                default='all',
                                help='Source to list sessions from (default: all)')
         list_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
@@ -126,7 +128,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # export command
         export_parser = subparsers.add_parser('export', help='Export chat sessions')
         export_parser.add_argument('--source', '-s',
-                                 choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'all'],
+                                 choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'all'],
                                  default='all',
                                  help='Source to export from (default: all)')
         export_parser.add_argument('--format', '-f', 
@@ -231,7 +233,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         
         # Collect sessions from all requested sources
         all_sessions = []
-        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode'] if args.source == 'all' else [args.source]
         self._print_claude_version_notice(sources_to_check)
         self._print_codex_version_notice(sources_to_check)
         
@@ -286,7 +288,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         
         # Collect chats from all requested sources
         all_chats = []
-        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex'] if args.source == 'all' else [args.source]
+        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode'] if args.source == 'all' else [args.source]
         self._print_claude_version_notice(sources_to_check)
         self._print_codex_version_notice(sources_to_check)
         

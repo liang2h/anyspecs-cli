@@ -13,11 +13,11 @@
 
 </div>
 
-AnySpecs CLI is a unified command-line tool for exporting chat history from multiple AI assistants. It currently supports **Cursor AI**, **Claude Code**, **Codex cli**, **Augment** and **Kiro Records**, with support for various export formats including Markdown, HTML, and JSON.
+AnySpecs CLI is a unified command-line tool for exporting chat history from multiple AI assistants. It currently supports **Cursor AI**, **Claude Code**, **Codex cli**, **Augment**, **OpenCode** and **Kiro Records**, with support for various export formats including Markdown, HTML, and JSON.
 
 ## Features
 
-- **Multi-Source Support**: Export from Cursor AI, Claude Code, Augment Code, Codex cli and Kiro Records(More to come)
+- **Multi-Source Support**: Export from Cursor AI, Claude Code, Augment Code, Codex cli, OpenCode and Kiro Records(More to come)
 - **Multiple Export Formats**: Markdown, HTML, and JSON
 - **Project-Based and Workspace Filtering**: Export sessions by project or current directory
 - **Flexible Session Management**: List, filter, and export specific sessions
@@ -58,7 +58,7 @@ pip install anyspecs
 anyspecs list
 
 # List only Cursor/Claude/Kiro sessions in this workspace
-anyspecs list --source cursor/claude/kiro/augment/codex/all
+anyspecs list --source cursor/claude/kiro/augment/codex/opencode/all
 ```
 
 ### Export Chat Sessions
@@ -77,7 +77,7 @@ anyspecs export --now
 anyspecs export [--session-id abc123] [--format json]
 
 # Export specific source sessions only(default is markdown) with custom output path
-anyspecs export [--source claude/cursor/kiro/augment/codex] [--format markdown] [--output ./exports]
+anyspecs export [--source claude/cursor/kiro/augment/codex/opencode] [--format markdown] [--output ./exports]
 
 # Exported files are written to .anyspecs/ with full session IDs and a sidecar metadata file
 # Example:
@@ -204,6 +204,7 @@ anyspecs --help
 - Claude Code: from Claude Code's JSONL history files
 - Augment Code: from VSCode's history databases
 - Codex cli: from Codex cli's history files
+- OpenCode: from OpenCode's local raw storage files
 - Kiro Records: from summary directory of Kiro
 
 History mainly includes:

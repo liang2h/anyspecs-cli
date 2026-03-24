@@ -262,7 +262,7 @@ class AIProcessor:
         name = Path(filename).stem
         
         # Remove common prefixes
-        for prefix in ['cursor-chat-', 'claude-chat-', 'kiro-chat-', 'chat-', 'export-']:
+        for prefix in ['cursor-chat-', 'claude-chat-', 'kiro-chat-', 'codex-chat-', 'augment-chat-', 'opencode-chat-', 'chat-', 'export-']:
             if name.startswith(prefix):
                 name = name[len(prefix):]
         

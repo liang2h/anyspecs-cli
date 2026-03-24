@@ -2,7 +2,7 @@
 AnySpecs CLI - Code is Cheap, Show me Any Specs
 
 A unified CLI tool for exporting chat history from multiple AI assistants.
-Supports Cursor AI and Claude Code with various export formats.
+Supports Cursor AI, Claude Code, Codex CLI, Augment, Kiro Records and OpenCode.
 """
 
 __version__ = "0.0.5"

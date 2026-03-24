@@ -1,0 +1,10 @@
+{
+  "id": "prt_c086b76dc00142EL15tvuho8zI",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c086a70ce001rQx8HrsVQwr19j",
+  "type": "patch",
+  "hash": "fixture-patch-hash-001",
+  "files": [
+    "/Users/redacted/work/project/sample-app/configs/virtual-service.yaml"
+  ]
+}

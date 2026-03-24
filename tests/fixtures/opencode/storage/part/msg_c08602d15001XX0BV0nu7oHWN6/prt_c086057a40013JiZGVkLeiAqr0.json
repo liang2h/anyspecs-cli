@@ -1,0 +1,26 @@
+{
+  "id": "prt_c086057a40013JiZGVkLeiAqr0",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c08602d15001XX0BV0nu7oHWN6",
+  "type": "tool",
+  "callID": "toolu_fixture_ls_001",
+  "tool": "bash",
+  "state": {
+    "status": "completed",
+    "input": {
+      "command": "ls -la \"sample/grpc\" 2>/dev/null || echo \"目录不存在\"",
+      "description": "检查 sample/grpc 目录是否存在"
+    },
+    "output": "total 8\ndrwxr-xr-x  3 user  staff   96 Jan 29 11:58 .\ndrwxr-xr-x  6 user  staff  192 Jan 29 11:58 ..\n-rw-r--r--  1 user  staff  512 Jan 29 11:58 背景.md\n",
+    "title": "检查 sample/grpc 目录是否存在",
+    "metadata": {
+      "exit": 0,
+      "description": "检查 sample/grpc 目录是否存在",
+      "truncated": false
+    },
+    "time": {
+      "start": 1769667058078,
+      "end": 1769667058109
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "prt_c086059a7001ZhmNlEBr5pmvOq",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c08602d15001XX0BV0nu7oHWN6",
+  "type": "tool",
+  "callID": "toolu_fixture_pwd_001",
+  "tool": "bash",
+  "state": {
+    "status": "completed",
+    "input": {
+      "command": "pwd",
+      "description": "确认当前工作目录"
+    },
+    "output": "/Users/redacted/work/project/sample-app\n",
+    "title": "确认当前工作目录",
+    "metadata": {
+      "exit": 0,
+      "description": "确认当前工作目录",
+      "truncated": false
+    },
+    "time": {
+      "start": 1769667058087,
+      "end": 1769667058104
+    }
+  }
+}

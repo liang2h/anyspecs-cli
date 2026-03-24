@@ -65,7 +65,12 @@ class SpecsFormatter:
             extracted = re.sub(r'\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}.*$', '', extracted)
             
             # Remove common prefixes
-            extracted = re.sub(r'^(conversation|chat|context|export|cursor-chat|claude-chat|kiro-chat)[-_]?', '', extracted, flags=re.IGNORECASE)
+            extracted = re.sub(
+                r'^(conversation|chat|context|export|cursor-chat|claude-chat|kiro-chat|codex-chat|augment-chat|opencode-chat)[-_]?',
+                '',
+                extracted,
+                flags=re.IGNORECASE,
+            )
             
             # If we have meaningful content, use it
             if 0 < len(extracted) < 50:

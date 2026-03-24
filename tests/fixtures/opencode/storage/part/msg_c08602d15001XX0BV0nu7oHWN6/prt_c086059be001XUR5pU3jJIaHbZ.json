@@ -1,0 +1,9 @@
+{
+  "id": "prt_c086059be001XUR5pU3jJIaHbZ",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c08602d15001XX0BV0nu7oHWN6",
+  "type": "step-finish",
+  "reason": "tool-calls",
+  "snapshot": "fixture-step-start-001",
+  "cost": 0
+}
