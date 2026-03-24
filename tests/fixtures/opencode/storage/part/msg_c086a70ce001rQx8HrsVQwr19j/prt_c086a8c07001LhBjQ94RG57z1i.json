@@ -1,0 +1,25 @@
+{
+  "id": "prt_c086a8c07001LhBjQ94RG57z1i",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c086a70ce001rQx8HrsVQwr19j",
+  "type": "tool",
+  "callID": "toolu_fixture_background_001",
+  "tool": "background_output",
+  "state": {
+    "status": "completed",
+    "input": {
+      "block": true,
+      "task_id": "bg_fixture_001",
+      "timeout": 60000
+    },
+    "output": "Timeout exceeded (60000ms). Task still running.\n\n# Task Status\n\n| Field | Value |\n|-------|-------|\n| Task ID | `bg_fixture_001` |\n| Description | 研究 Java gRPC 客户端代理模式 |\n| Agent | librarian |\n| Status | **running** |\n| Duration | 2m 25s |\n| Session ID | `ses_fixture_background` |\n",
+    "title": "",
+    "metadata": {
+      "truncated": false
+    },
+    "time": {
+      "start": 1769667726343,
+      "end": 1769667786388
+    }
+  }
+}

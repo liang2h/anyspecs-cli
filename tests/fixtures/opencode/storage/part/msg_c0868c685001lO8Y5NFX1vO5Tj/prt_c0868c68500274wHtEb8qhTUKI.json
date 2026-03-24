@@ -1,0 +1,7 @@
+{
+  "id": "prt_c0868c68500274wHtEb8qhTUKI",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c0868c685001lO8Y5NFX1vO5Tj",
+  "type": "text",
+  "text": "提供一份技术方案文档，解决 service 通讯协议升级成 gRPC，要求业务最少侵入，当前部署和调用情况参考文档 @sample/grpc/背景.md"
+}

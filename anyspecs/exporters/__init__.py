@@ -6,5 +6,12 @@ from .cursor import CursorExtractor
 from .claude import ClaudeExtractor
 from .kiro import KiroExtractor
 from .augment import AugmentExtractor
+from .opencode import OpenCodeExtractor
 
-__all__ = ["CursorExtractor", "ClaudeExtractor", "KiroExtractor", "AugmentExtractor"] 
+__all__ = [
+    "CursorExtractor",
+    "ClaudeExtractor",
+    "KiroExtractor",
+    "AugmentExtractor",
+    "OpenCodeExtractor",
+]

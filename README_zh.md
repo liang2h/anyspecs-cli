@@ -13,11 +13,11 @@
 
 </div>
 
-AnySpecs CLI 是一个统一的命令行工具，用于从多个 AI 助手导出聊天记录。它目前支持 **Cursor AI**、**Claude Code**、**Augment Code**、**Codex CLI** 和 **Kiro Records**，并支持多种导出格式，包括 Markdown、HTML 和 JSON。
+AnySpecs CLI 是一个统一的命令行工具，用于从多个 AI 助手导出聊天记录。它目前支持 **Cursor AI**、**Claude Code**、**Augment Code**、**Codex CLI**、**OpenCode** 和 **Kiro Records**，并支持多种导出格式，包括 Markdown、HTML 和 JSON。
 
 ## ✨ 功能特性
 
-- **多源支持**: 从 Cursor、Claude、Augment、Codex、Kiro 等来源导出（持续增加）。
+- **多源支持**: 从 Cursor、Claude、Augment、Codex、OpenCode、Kiro 等来源导出（持续增加）。
 - **多种导出格式**: 支持 Markdown、HTML 和 JSON。
 - **项目与工作区过滤**: 按项目或当前目录导出聊天会话。
 - **灵活的会话管理**: 列表、筛选和导出特定的聊天会话。
@@ -57,8 +57,8 @@ pip install anyspecs
 # 列出所有来源的当前工作区的聊天会话
 anyspecs list
 
-# 仅列出当前工作区的 Cursor/Claude/Kiro/Augment/Codex 会话
-anyspecs list --source cursor/claude/kiro/augment/codex/all
+# 仅列出当前工作区的 Cursor/Claude/Kiro/Augment/Codex/OpenCode 会话
+anyspecs list --source cursor/claude/kiro/augment/codex/opencode/all
 
 # 显示详细信息
 anyspecs list --verbose
@@ -80,7 +80,7 @@ anyspecs export --now
 anyspecs export --session-id abc123 --format json
 
 # 导出指定来源（默认 markdown）并自定义输出目录
-anyspecs export --source claude/cursor/kiro/augment/codex --format markdown --output ./exports
+anyspecs export --source claude/cursor/kiro/augment/codex/opencode --format markdown --output ./exports
 
 # 导出文件默认写入 .anyspecs/，文件名包含完整 session_id，并附带 sidecar 元数据
 # 例如：
@@ -208,6 +208,14 @@ OSS 上传规则：
 从 `.kiro` 目录中提取和合并 Markdown 文档，包括：
 - 文件元数据 (名称、修改时间)
 - 自动项目摘要检测
+
+### OpenCode
+
+从 OpenCode 的本地原始存储目录中提取聊天记录，包括：
+- session / message / part 三层结构
+- 用户消息、AI 回复
+- 工具调用和工具输出
+- 文件引用与 patch 元数据
 
 ## 🤝 贡献
 

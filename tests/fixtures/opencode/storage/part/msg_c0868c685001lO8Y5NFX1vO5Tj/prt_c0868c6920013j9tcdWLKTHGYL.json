@@ -1,0 +1,8 @@
+{
+  "id": "prt_c0868c6920013j9tcdWLKTHGYL",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "messageID": "msg_c0868c685001lO8Y5NFX1vO5Tj",
+  "type": "text",
+  "text": "<file>\n00001| 当前系统同时提供 HTTP 和 Dubbo 接口，需要在不侵入业务代码的情况下平滑升级到 gRPC。\n00002| 现有调用链依赖统一的服务地址注入机制。\n00003| 目标是在保留现有调用方接口的前提下完成协议升级。\n</file>",
+  "synthetic": true
+}

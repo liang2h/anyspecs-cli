@@ -1,0 +1,29 @@
+{
+  "id": "msg_c08602d15001XX0BV0nu7oHWN6",
+  "sessionID": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "role": "assistant",
+  "time": {
+    "created": 1769667046677,
+    "completed": 1769667058183
+  },
+  "parentID": "msg_c08602cb1001ZGAFP29gC3ht1T",
+  "modelID": "claude-sonnet-4.5",
+  "providerID": "github-copilot",
+  "mode": "sisyphus",
+  "agent": "sisyphus",
+  "path": {
+    "cwd": "/Users/redacted/work/project/sample-app",
+    "root": "/Users/redacted/work/project/sample-app"
+  },
+  "cost": 0,
+  "tokens": {
+    "input": 9,
+    "output": 368,
+    "reasoning": 0,
+    "cache": {
+      "read": 0,
+      "write": 22435
+    }
+  },
+  "finish": "tool-calls"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "ses_3f79fd355ffe0mH9k1yc0aO55K",
+  "slug": "cosmic-meadow",
+  "version": "1.1.40",
+  "projectID": "project-fixture",
+  "directory": "/Users/redacted/work/project/sample-app",
+  "title": "将 sample/grpc 设为默认上下文目录",
+  "time": {
+    "created": 1769667046570,
+    "updated": 1769667786461
+  },
+  "summary": {
+    "additions": 12,
+    "deletions": 0,
+    "files": 1
+  }
+}
