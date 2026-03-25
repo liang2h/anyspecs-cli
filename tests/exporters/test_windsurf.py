@@ -102,6 +102,358 @@ def test_extracts_multiple_windsurf_sessions_and_historical_pb_content(tmp_path,
     assert "核心数据模型" in historical_chat["messages"][2]["content"]
 
 
+def test_extract_chats_for_export_only_decodes_requested_session(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_fetch_workspace_trajectories(
+        self,
+        workspace_id,
+        session_ids,
+        binary_path,
+        node_binary,
+    ):
+        calls.append((workspace_id, list(session_ids)))
+        decoded = {}
+        decoded_root = self.storage_root / "decoded"
+        for session_id in session_ids:
+            decoded_path = decoded_root / f"{session_id}.json"
+            decoded[session_id] = json.loads(decoded_path.read_text(encoding="utf-8"))
+        return decoded, {}
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_fetch_workspace_trajectories",
+        fake_fetch_workspace_trajectories,
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_get_language_server_binary",
+        lambda self: Path(__file__),
+    )
+
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    index_context = extractor.get_index_context()
+
+    chats = extractor.extract_chats_for_export(
+        session_ids=[HISTORICAL_SESSION_ID],
+        index_context=index_context,
+    )
+
+    assert [chat["session_id"] for chat in chats] == [HISTORICAL_SESSION_ID]
+    assert calls == [(WORKSPACE_ID, [HISTORICAL_SESSION_ID])]
+
+
+def test_command_scope_reuses_workspace_server_for_same_workspace(tmp_path, monkeypatch):
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    start_calls = []
+    stop_calls = []
+    cleanup_calls = []
+
+    class DummyProcess:
+        def __init__(self):
+            self.exit_code = None
+
+        def poll(self):
+            return self.exit_code
+
+        def terminate(self):
+            self.exit_code = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            self.exit_code = -9
+
+    def fake_start_workspace_server(self, workspace_id, binary_path, node_binary):
+        start_calls.append((workspace_id, str(binary_path), node_binary))
+        return (
+            {
+                "workspace_id": workspace_id,
+                "process": DummyProcess(),
+                "manager_dir": tmp_path / f"manager-{len(start_calls)}",
+                "csrf_token": f"csrf-{len(start_calls)}",
+                "base_url": f"http://127.0.0.1:{43000 + len(start_calls)}",
+            },
+            None,
+        )
+
+    def fake_run_node_json(self, node_binary, script, payload, error_context):
+        del self, node_binary, script, error_context
+        return {
+            "trajectories": {
+                session_id: {"sessionId": session_id}
+                for session_id in payload["session_ids"]
+            },
+            "errors": {},
+        }
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_start_workspace_server",
+        fake_start_workspace_server,
+    )
+    monkeypatch.setattr(WindsurfExtractor, "_run_node_json", fake_run_node_json)
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_stop_language_server",
+        lambda self, process: stop_calls.append(process),
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_cleanup_manager_dir",
+        lambda self, manager_dir: cleanup_calls.append(Path(manager_dir)),
+    )
+
+    extractor.begin_command_scope()
+    try:
+        decoded_one, errors_one = extractor._fetch_workspace_trajectories(
+            workspace_id=WORKSPACE_ID,
+            session_ids=[ACTIVE_SESSION_ID],
+            binary_path=Path(__file__),
+            node_binary="node",
+        )
+        decoded_two, errors_two = extractor._fetch_workspace_trajectories(
+            workspace_id=WORKSPACE_ID,
+            session_ids=[HISTORICAL_SESSION_ID],
+            binary_path=Path(__file__),
+            node_binary="node",
+        )
+    finally:
+        extractor.close_command_scope()
+
+    assert errors_one == {}
+    assert errors_two == {}
+    assert decoded_one == {ACTIVE_SESSION_ID: {"sessionId": ACTIVE_SESSION_ID}}
+    assert decoded_two == {HISTORICAL_SESSION_ID: {"sessionId": HISTORICAL_SESSION_ID}}
+    assert start_calls == [(WORKSPACE_ID, str(Path(__file__)), "node")]
+    assert len(stop_calls) == 1
+    assert len(cleanup_calls) == 1
+
+
+def test_command_scope_starts_distinct_servers_per_workspace(tmp_path, monkeypatch):
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    start_calls = []
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    def fake_start_workspace_server(self, workspace_id, binary_path, node_binary):
+        del self, binary_path, node_binary
+        start_calls.append(workspace_id)
+        return (
+            {
+                "workspace_id": workspace_id,
+                "process": DummyProcess(),
+                "manager_dir": tmp_path / f"manager-{workspace_id}",
+                "csrf_token": f"csrf-{workspace_id}",
+                "base_url": f"http://127.0.0.1:{43000 + len(start_calls)}",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_start_workspace_server",
+        fake_start_workspace_server,
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_run_node_json",
+        lambda self, node_binary, script, payload, error_context: {
+            "trajectories": {
+                session_id: {"sessionId": session_id}
+                for session_id in payload["session_ids"]
+            },
+            "errors": {},
+        },
+    )
+    monkeypatch.setattr(WindsurfExtractor, "_stop_language_server", lambda self, process: None)
+    monkeypatch.setattr(WindsurfExtractor, "_cleanup_manager_dir", lambda self, manager_dir: None)
+
+    extractor.begin_command_scope()
+    try:
+        extractor._fetch_workspace_trajectories(
+            workspace_id=WORKSPACE_ID,
+            session_ids=[ACTIVE_SESSION_ID],
+            binary_path=Path(__file__),
+            node_binary="node",
+        )
+        extractor._fetch_workspace_trajectories(
+            workspace_id="other-workspace",
+            session_ids=[HISTORICAL_SESSION_ID],
+            binary_path=Path(__file__),
+            node_binary="node",
+        )
+    finally:
+        extractor.close_command_scope()
+
+    assert start_calls == [WORKSPACE_ID, "other-workspace"]
+
+
+def test_fetch_workspace_trajectories_restarts_dead_cached_server_once(tmp_path, monkeypatch):
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    start_calls = []
+    stop_calls = []
+    cleanup_calls = []
+
+    class DummyProcess:
+        def __init__(self, exit_code):
+            self.exit_code = exit_code
+
+        def poll(self):
+            return self.exit_code
+
+        def terminate(self):
+            self.exit_code = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            self.exit_code = -9
+
+    def fake_start_workspace_server(self, workspace_id, binary_path, node_binary):
+        del self, binary_path, node_binary
+        start_calls.append(workspace_id)
+        process = DummyProcess(1 if len(start_calls) == 1 else None)
+        return (
+            {
+                "workspace_id": workspace_id,
+                "process": process,
+                "manager_dir": tmp_path / f"manager-{len(start_calls)}",
+                "csrf_token": f"csrf-{len(start_calls)}",
+                "base_url": f"http://127.0.0.1:{43000 + len(start_calls)}",
+            },
+            None,
+        )
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_start_workspace_server",
+        fake_start_workspace_server,
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_run_node_json",
+        lambda self, node_binary, script, payload, error_context: {
+            "trajectories": {
+                session_id: {"sessionId": session_id}
+                for session_id in payload["session_ids"]
+            },
+            "errors": {},
+        },
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_stop_language_server",
+        lambda self, process: stop_calls.append(process),
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_cleanup_manager_dir",
+        lambda self, manager_dir: cleanup_calls.append(Path(manager_dir)),
+    )
+
+    extractor.begin_command_scope()
+    try:
+        decoded, errors = extractor._fetch_workspace_trajectories(
+            workspace_id=WORKSPACE_ID,
+            session_ids=[ACTIVE_SESSION_ID],
+            binary_path=Path(__file__),
+            node_binary="node",
+        )
+    finally:
+        extractor.close_command_scope()
+
+    assert errors == {}
+    assert decoded == {ACTIVE_SESSION_ID: {"sessionId": ACTIVE_SESSION_ID}}
+    assert start_calls == [WORKSPACE_ID, WORKSPACE_ID]
+    assert len(stop_calls) == 2
+    assert len(cleanup_calls) == 2
+
+
+def test_begin_command_scope_clears_previous_workspace_servers(tmp_path, monkeypatch):
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    stopped = []
+    cleaned = []
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_stop_language_server",
+        lambda self, process: stopped.append(process),
+    )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_cleanup_manager_dir",
+        lambda self, manager_dir: cleaned.append(Path(manager_dir)),
+    )
+
+    extractor._workspace_servers[WORKSPACE_ID] = {
+        "process": DummyProcess(),
+        "manager_dir": tmp_path / "stale-manager",
+    }
+
+    extractor.begin_command_scope()
+
+    assert extractor._command_scope_active is True
+    assert extractor._workspace_servers == {}
+    assert len(stopped) == 1
+    assert len(cleaned) == 1
+
+
 def test_list_sessions_lists_all_project_sessions(tmp_path, monkeypatch):
     install_fixture_pb_decoder(monkeypatch)
     storage_base = copy_fixture_storage(tmp_path)
@@ -117,10 +469,36 @@ def test_list_sessions_lists_all_project_sessions(tmp_path, monkeypatch):
     by_id = {session["session_id"]: session for session in sessions}
     assert by_id["cbc99144"]["preview"] == "介绍下项目概况"
     assert by_id["cbc99144"]["message_count"] == 3
-    assert by_id["f32adc43"]["preview"] == "梳理一下核心数据模型"
-    assert by_id["f32adc43"]["message_count"] == 3
+    assert by_id["f32adc43"]["preview"] == "Data Model Review"
+    assert by_id["f32adc43"]["message_count"] == 0
     expected_date = datetime.fromtimestamp(1774347887599 / 1000).strftime("%Y-%m-%d %H:%M")
     assert by_id["cbc99144"]["date"] == expected_date
+
+
+def test_list_sessions_does_not_trigger_pb_decoding(tmp_path, monkeypatch):
+    calls = []
+
+    def fail_if_called(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("list_sessions should not decode pb trajectories")
+
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_fetch_workspace_trajectories",
+        fail_if_called,
+    )
+
+    storage_base = copy_fixture_storage(tmp_path)
+    extractor = make_extractor(
+        storage_base,
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    sessions = extractor.list_sessions()
+
+    assert len(sessions) == 2
+    assert calls == []
 
 
 def test_historical_export_is_stable_when_active_cache_switches(tmp_path, monkeypatch):

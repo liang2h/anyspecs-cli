@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote, urlparse
 
 from ..core.extractors import BaseExtractor
@@ -215,6 +215,9 @@ class WindsurfExtractor(BaseExtractor):
         }
         self.session_decode_errors: Dict[str, str] = {}
         self._last_session_records: Dict[str, Dict[str, Any]] = {}
+        self._last_index_context: Optional[Dict[str, Any]] = None
+        self._workspace_servers: Dict[str, Dict[str, Any]] = {}
+        self._command_scope_active = False
 
         self.logger.debug(
             "Resolved Windsurf paths: app_root=%s (%s), storage_root=%s (%s), "
@@ -227,8 +230,64 @@ class WindsurfExtractor(BaseExtractor):
             bundle_source,
         )
 
+    def begin_command_scope(self) -> None:
+        """Reset Windsurf runtime state for a single CLI command."""
+        self.close_command_scope()
+        self._command_scope_active = True
+
+    def close_command_scope(self) -> None:
+        """Tear down cached Windsurf language servers for the current CLI command."""
+        for workspace_id in list(self._workspace_servers.keys()):
+            self._discard_workspace_server(workspace_id)
+        self._command_scope_active = False
+
     def extract_chats(self) -> List[Dict[str, Any]]:
         """Extract all chat data from Windsurf."""
+        self.session_decode_errors = {}
+        index_context = self.get_index_context()
+        return self.extract_chats_for_export(index_context=index_context)
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """List Windsurf chat sessions for the current workspace."""
+        current_project = get_project_name().lower()
+        index_context = self.get_index_context()
+        session_records = index_context["session_records"]
+
+        sessions: List[Dict[str, Any]] = []
+        for record in session_records:
+            session_id = record["session_id"]
+            project_name = record["project_name"] or "Unknown Project"
+            if (
+                current_project not in project_name.lower()
+                and project_name.lower() not in current_project
+            ):
+                continue
+
+            active_messages = []
+            if record.get("active_trajectory"):
+                active_messages = self._normalize_trajectory_messages(record["active_trajectory"])
+
+            preview = self._build_preview(
+                active_messages,
+                str(record["summary"].get("summary") or "No messages"),
+            )
+            message_count = len(active_messages) if active_messages else 0
+
+            sessions.append(
+                {
+                    "session_id": session_id[:8],
+                    "project": project_name,
+                    "date": self._format_session_date(record["created_at"]),
+                    "message_count": message_count,
+                    "preview": preview,
+                    "workspace_id": record["workspace_id"],
+                }
+            )
+
+        return sessions
+
+    def get_index_context(self) -> Dict[str, Any]:
+        """Build and store the lightweight Windsurf session index context."""
         self.session_decode_errors = {}
         self._last_session_records = {}
 
@@ -238,23 +297,97 @@ class WindsurfExtractor(BaseExtractor):
                 self.app_root,
                 self.storage_root,
             )
-            return []
+            index_context = {
+                "workspace_map": {},
+                "cached_state": {},
+                "session_records": [],
+            }
+            self._last_index_context = index_context
+            return index_context
 
         workspace_map = self._load_workspace_map()
         cached_state = self._load_cached_state()
         session_records = self._build_session_records(cached_state, workspace_map)
         self._last_session_records = {record["session_id"]: record for record in session_records}
 
+        index_context = {
+            "workspace_map": workspace_map,
+            "cached_state": cached_state,
+            "session_records": session_records,
+        }
+        self._last_index_context = index_context
+        return index_context
+
+    def build_filter_candidates(
+        self,
+        index_context: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Build lightweight chat-like records for CLI filtering without decoding bodies."""
+        if index_context is None:
+            index_context = self.get_index_context()
+
+        candidates: List[Dict[str, Any]] = []
+        for record in index_context["session_records"]:
+            candidates.append(
+                {
+                    "session_id": record["session_id"],
+                    "project": {
+                        "name": record["project_name"],
+                        "rootPath": record["project_root"],
+                    },
+                    "date": record["created_at"] or record["updated_at"],
+                    "metadata": {
+                        "workspace_id": record["workspace_id"],
+                        "summary": record["summary"],
+                        "has_pb": record["pb_path"].exists(),
+                        "has_active_fallback": bool(record.get("active_trajectory")),
+                    },
+                    "source": "windsurf",
+                    "messages": [],
+                }
+            )
+
+        return candidates
+
+    def extract_chats_for_export(
+        self,
+        session_ids: Optional[List[str]] = None,
+        index_context: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract only the requested Windsurf chats, decoding bodies on demand."""
+        self.session_decode_errors = {}
+
+        if index_context is None:
+            index_context = self.get_index_context()
+        else:
+            self._last_index_context = index_context
+            self._last_session_records = {
+                record["session_id"]: record for record in index_context["session_records"]
+            }
+
+        workspace_map = index_context["workspace_map"]
+        session_records = index_context["session_records"]
+
+        selected_records = session_records
+        requested_order: Optional[List[str]] = None
+        if session_ids is not None:
+            requested_order = list(session_ids)
+            allowed_session_ids = set(session_ids)
+            selected_records = [
+                record for record in session_records if record["session_id"] in allowed_session_ids
+            ]
+
         chats_by_id: Dict[str, Dict[str, Any]] = {}
         unresolved_errors: Dict[str, str] = {}
 
-        for chat in self._load_json_chats(workspace_map):
+        allowed_json_session_ids = {record["session_id"] for record in selected_records}
+        for chat in self._load_json_chats(workspace_map, allowed_json_session_ids):
             self._store_preferred_chat(chats_by_id, chat)
 
-        trajectories_by_session, trajectory_errors = self._decode_pb_trajectories(session_records)
+        trajectories_by_session, trajectory_errors = self._decode_pb_trajectories(selected_records)
         unresolved_errors.update(trajectory_errors)
 
-        for record in session_records:
+        for record in selected_records:
             session_id = record["session_id"]
             chat = None
 
@@ -287,77 +420,21 @@ class WindsurfExtractor(BaseExtractor):
             if session_id not in chats_by_id:
                 self.session_decode_errors[session_id] = message
 
-        chats = list(chats_by_id.values())
-        chats.sort(
-            key=lambda chat: chat["session"].get("lastUpdatedAt") or 0,
-            reverse=True,
-        )
+        if requested_order is not None:
+            chats = [
+                chats_by_id[session_id]
+                for session_id in requested_order
+                if session_id in chats_by_id
+            ]
+        else:
+            chats = list(chats_by_id.values())
+            chats.sort(
+                key=lambda chat: chat["session"].get("lastUpdatedAt") or 0,
+                reverse=True,
+            )
+
         self.logger.info("Extracted %s Windsurf chat sessions", len(chats))
         return chats
-
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        """List Windsurf chat sessions for the current workspace."""
-        current_project = get_project_name().lower()
-        workspace_map = self._load_workspace_map()
-        cached_state = self._load_cached_state()
-        session_records = self._build_session_records(cached_state, workspace_map)
-        chats_by_id = {chat["session_id"]: chat for chat in self.extract_chats()}
-
-        sessions: List[Dict[str, Any]] = []
-        seen_session_ids = set()
-
-        for record in session_records:
-            session_id = record["session_id"]
-            project_name = record["project_name"] or "Unknown Project"
-            if (
-                current_project not in project_name.lower()
-                and project_name.lower() not in current_project
-            ):
-                continue
-
-            chat = chats_by_id.get(session_id)
-            preview = self._build_preview(
-                chat.get("messages", []) if chat else [],
-                str(record["summary"].get("summary") or "No messages"),
-            )
-            message_count = len(chat.get("messages", [])) if chat else 0
-
-            sessions.append(
-                {
-                    "session_id": session_id[:8],
-                    "project": project_name,
-                    "date": self._format_session_date(record["created_at"]),
-                    "message_count": message_count,
-                    "preview": preview,
-                    "workspace_id": record["workspace_id"],
-                }
-            )
-            seen_session_ids.add(session_id)
-
-        for session_id, chat in chats_by_id.items():
-            if session_id in seen_session_ids:
-                continue
-
-            project_name = chat.get("project", {}).get("name", "Unknown Project")
-            if (
-                current_project not in project_name.lower()
-                and project_name.lower() not in current_project
-            ):
-                continue
-
-            messages = chat.get("messages", [])
-            sessions.append(
-                {
-                    "session_id": session_id[:8],
-                    "project": project_name,
-                    "date": self._format_session_date(chat.get("session", {}).get("createdAt")),
-                    "message_count": len(messages),
-                    "preview": self._build_preview(messages),
-                    "workspace_id": chat.get("workspace_id", "unknown"),
-                }
-            )
-
-        return sessions
 
     def get_session_export_error(self, session_prefix: str) -> Optional[str]:
         """Return a user-facing export error for a Windsurf session prefix."""
@@ -578,6 +655,112 @@ class WindsurfExtractor(BaseExtractor):
         if not session_ids:
             return {}, {}
 
+        for attempt in range(2):
+            server_info, error_message, should_close = self.ensure_workspace_server(
+                workspace_id=workspace_id,
+                binary_path=binary_path,
+                node_binary=node_binary,
+            )
+            if not server_info:
+                return {}, {session_id: error_message for session_id in session_ids}
+
+            process = server_info["process"]
+            if process.poll() is not None:
+                if should_close:
+                    self._close_workspace_server(server_info)
+                else:
+                    self._discard_workspace_server(workspace_id)
+                if attempt == 0:
+                    continue
+                error_message = (
+                    f"Windsurf language server exited before handling workspace "
+                    f"'{workspace_id}'."
+                )
+                return {}, {session_id: error_message for session_id in session_ids}
+
+            response: Dict[str, Any] = {}
+            process_exited = False
+            try:
+                request_payload = {
+                    "extension_bundle_path": str(self.extension_bundle_path),
+                    "base_url": server_info["base_url"],
+                    "csrf_token": server_info["csrf_token"],
+                    "session_ids": session_ids,
+                }
+                response = self._run_node_json(
+                    node_binary=node_binary,
+                    script=WINDSURF_TRAJECTORY_FETCH_SCRIPT,
+                    payload=request_payload,
+                    error_context="Windsurf trajectory fetch",
+                )
+                process_exited = process.poll() is not None
+            finally:
+                if should_close:
+                    self._close_workspace_server(server_info)
+
+            if not response:
+                if process_exited and attempt == 0:
+                    self._discard_workspace_server(workspace_id)
+                    continue
+                error_message = (
+                    "Failed to decode Windsurf historical trajectories via the "
+                    "local language server."
+                )
+                return {}, {session_id: error_message for session_id in session_ids}
+
+            normalized_trajectories = {
+                str(session_id): trajectory
+                for session_id, trajectory in response.get("trajectories", {}).items()
+                if isinstance(trajectory, dict)
+            }
+            normalized_errors = {
+                str(session_id): str(message)
+                for session_id, message in response.get("errors", {}).items()
+                if message
+            }
+            return normalized_trajectories, normalized_errors
+
+        error_message = (
+            "Failed to decode Windsurf historical trajectories via the local "
+            "language server."
+        )
+        return {}, {session_id: error_message for session_id in session_ids}
+
+    def ensure_workspace_server(
+        self,
+        workspace_id: str,
+        binary_path: Path,
+        node_binary: str,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], bool]:
+        """Return a live language server for a workspace, reusing it within one command."""
+        existing = self._workspace_servers.get(workspace_id)
+        if existing:
+            process = existing["process"]
+            if process.poll() is None:
+                return existing, None, False
+            self._discard_workspace_server(workspace_id)
+
+        server_info, error_message = self._start_workspace_server(
+            workspace_id=workspace_id,
+            binary_path=binary_path,
+            node_binary=node_binary,
+        )
+        if not server_info:
+            return None, error_message, False
+
+        if self._command_scope_active:
+            self._workspace_servers[workspace_id] = server_info
+            return server_info, None, False
+
+        return server_info, None, True
+
+    def _start_workspace_server(
+        self,
+        workspace_id: str,
+        binary_path: Path,
+        node_binary: str,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Start a new Windsurf language server process for one workspace."""
         csrf_token = f"anyspecs-{uuid.uuid4().hex}"
         server_port = self._reserve_local_port()
         lsp_port = self._reserve_local_port()
@@ -608,54 +791,53 @@ class WindsurfExtractor(BaseExtractor):
             stderr=subprocess.DEVNULL,
         )
 
-        try:
-            listening_port = self._wait_for_language_server_port(
-                process=process,
-                manager_dir=manager_dir,
-                timeout_seconds=20,
+        listening_port = self._wait_for_language_server_port(
+            process=process,
+            manager_dir=manager_dir,
+            timeout_seconds=20,
+        )
+        if not listening_port:
+            error_message = (
+                f"Timed out waiting for Windsurf language server for workspace "
+                f"'{workspace_id}'."
             )
-            if not listening_port:
-                error_message = (
-                    f"Timed out waiting for Windsurf language server for workspace "
-                    f"'{workspace_id}'."
-                )
-                return {}, {session_id: error_message for session_id in session_ids}
+            self._close_workspace_server(
+                {
+                    "process": process,
+                    "manager_dir": manager_dir,
+                }
+            )
+            return None, error_message
 
-            request_payload = {
-                "extension_bundle_path": str(self.extension_bundle_path),
-                "base_url": f"http://127.0.0.1:{listening_port}",
+        return (
+            {
+                "workspace_id": workspace_id,
+                "process": process,
+                "listening_port": listening_port,
                 "csrf_token": csrf_token,
-                "session_ids": session_ids,
-            }
-            response = self._run_node_json(
-                node_binary=node_binary,
-                script=WINDSURF_TRAJECTORY_FETCH_SCRIPT,
-                payload=request_payload,
-                error_context="Windsurf trajectory fetch",
-            )
-            if not response:
-                error_message = (
-                    "Failed to decode Windsurf historical trajectories via the "
-                    "local language server."
-                )
-                return {}, {session_id: error_message for session_id in session_ids}
+                "manager_dir": manager_dir,
+                "binary_path": binary_path,
+                "node_binary": node_binary,
+                "base_url": f"http://127.0.0.1:{listening_port}",
+            },
+            None,
+        )
 
-            trajectories = response.get("trajectories", {})
-            errors = response.get("errors", {})
-            normalized_errors = {
-                str(session_id): str(message)
-                for session_id, message in errors.items()
-                if message
-            }
-            normalized_trajectories = {
-                str(session_id): trajectory
-                for session_id, trajectory in trajectories.items()
-                if isinstance(trajectory, dict)
-            }
-            return normalized_trajectories, normalized_errors
-        finally:
+    def _discard_workspace_server(self, workspace_id: str) -> None:
+        """Remove a cached workspace server and release its resources."""
+        server_info = self._workspace_servers.pop(workspace_id, None)
+        if server_info:
+            self._close_workspace_server(server_info)
+
+    def _close_workspace_server(self, server_info: Dict[str, Any]) -> None:
+        """Stop one workspace server and clean up its manager directory."""
+        process = server_info.get("process")
+        if process is not None:
             self._stop_language_server(process)
-            self._cleanup_manager_dir(manager_dir)
+
+        manager_dir = server_info.get("manager_dir")
+        if manager_dir is not None:
+            self._cleanup_manager_dir(Path(manager_dir))
 
     def _wait_for_language_server_port(
         self,
@@ -1018,12 +1200,20 @@ class WindsurfExtractor(BaseExtractor):
 
         return workspace_map
 
-    def _load_json_chats(self, workspace_map: Dict[str, Dict[str, str]]) -> List[Dict[str, Any]]:
+    def _load_json_chats(
+        self,
+        workspace_map: Dict[str, Dict[str, str]],
+        allowed_session_ids: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Load directly readable Windsurf JSON chat files."""
         chats: List[Dict[str, Any]] = []
         for session_file in self._list_session_files():
             session_data = self._read_json_file(session_file)
             if not session_data:
+                continue
+
+            session_id = str(session_data.get("session_id") or session_data.get("id") or session_file.stem)
+            if allowed_session_ids is not None and session_id not in allowed_session_ids:
                 continue
 
             chat = self._create_chat(
