@@ -581,80 +581,81 @@ class WindsurfExtractor(BaseExtractor):
         csrf_token = f"anyspecs-{uuid.uuid4().hex}"
         server_port = self._reserve_local_port()
         lsp_port = self._reserve_local_port()
-        with tempfile.TemporaryDirectory(prefix="anyspecs-windsurf-ls-") as manager_dir:
-            command = [
-                str(binary_path),
-                "--server_port",
-                str(server_port),
-                "--lsp_port",
-                str(lsp_port),
-                "--workspace_id",
-                workspace_id,
-                "--codeium_dir",
-                str(self.storage_root),
-                "--database_dir",
-                str(self.storage_root / "database"),
-                "--manager_dir",
-                manager_dir,
-                "--csrf_token",
-                csrf_token,
-                "--verbosity_level",
-                "1",
-            ]
+        manager_dir = Path(tempfile.mkdtemp(prefix="anyspecs-windsurf-ls-"))
+        command = [
+            str(binary_path),
+            "--server_port",
+            str(server_port),
+            "--lsp_port",
+            str(lsp_port),
+            "--workspace_id",
+            workspace_id,
+            "--codeium_dir",
+            str(self.storage_root),
+            "--database_dir",
+            str(self.storage_root / "database"),
+            "--manager_dir",
+            str(manager_dir),
+            "--csrf_token",
+            csrf_token,
+            "--verbosity_level",
+            "1",
+        ]
 
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            listening_port = self._wait_for_language_server_port(
+                process=process,
+                manager_dir=manager_dir,
+                timeout_seconds=20,
             )
-
-            try:
-                listening_port = self._wait_for_language_server_port(
-                    process=process,
-                    manager_dir=Path(manager_dir),
-                    timeout_seconds=20,
+            if not listening_port:
+                error_message = (
+                    f"Timed out waiting for Windsurf language server for workspace "
+                    f"'{workspace_id}'."
                 )
-                if not listening_port:
-                    error_message = (
-                        f"Timed out waiting for Windsurf language server for workspace "
-                        f"'{workspace_id}'."
-                    )
-                    return {}, {session_id: error_message for session_id in session_ids}
+                return {}, {session_id: error_message for session_id in session_ids}
 
-                request_payload = {
-                    "extension_bundle_path": str(self.extension_bundle_path),
-                    "base_url": f"http://127.0.0.1:{listening_port}",
-                    "csrf_token": csrf_token,
-                    "session_ids": session_ids,
-                }
-                response = self._run_node_json(
-                    node_binary=node_binary,
-                    script=WINDSURF_TRAJECTORY_FETCH_SCRIPT,
-                    payload=request_payload,
-                    error_context="Windsurf trajectory fetch",
+            request_payload = {
+                "extension_bundle_path": str(self.extension_bundle_path),
+                "base_url": f"http://127.0.0.1:{listening_port}",
+                "csrf_token": csrf_token,
+                "session_ids": session_ids,
+            }
+            response = self._run_node_json(
+                node_binary=node_binary,
+                script=WINDSURF_TRAJECTORY_FETCH_SCRIPT,
+                payload=request_payload,
+                error_context="Windsurf trajectory fetch",
+            )
+            if not response:
+                error_message = (
+                    "Failed to decode Windsurf historical trajectories via the "
+                    "local language server."
                 )
-                if not response:
-                    error_message = (
-                        "Failed to decode Windsurf historical trajectories via the "
-                        "local language server."
-                    )
-                    return {}, {session_id: error_message for session_id in session_ids}
+                return {}, {session_id: error_message for session_id in session_ids}
 
-                trajectories = response.get("trajectories", {})
-                errors = response.get("errors", {})
-                normalized_errors = {
-                    str(session_id): str(message)
-                    for session_id, message in errors.items()
-                    if message
-                }
-                normalized_trajectories = {
-                    str(session_id): trajectory
-                    for session_id, trajectory in trajectories.items()
-                    if isinstance(trajectory, dict)
-                }
-                return normalized_trajectories, normalized_errors
-            finally:
-                self._stop_language_server(process)
+            trajectories = response.get("trajectories", {})
+            errors = response.get("errors", {})
+            normalized_errors = {
+                str(session_id): str(message)
+                for session_id, message in errors.items()
+                if message
+            }
+            normalized_trajectories = {
+                str(session_id): trajectory
+                for session_id, trajectory in trajectories.items()
+                if isinstance(trajectory, dict)
+            }
+            return normalized_trajectories, normalized_errors
+        finally:
+            self._stop_language_server(process)
+            self._cleanup_manager_dir(manager_dir)
 
     def _wait_for_language_server_port(
         self,
@@ -801,6 +802,28 @@ class WindsurfExtractor(BaseExtractor):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+    def _cleanup_manager_dir(self, manager_dir: Path) -> None:
+        """Remove the temporary Windsurf manager directory without failing export flow."""
+        try:
+            if not manager_dir.exists():
+                return
+        except OSError as e:
+            self.logger.debug(
+                "Failed to inspect Windsurf manager dir before cleanup %s: %s",
+                manager_dir,
+                e,
+            )
+            return
+
+        try:
+            shutil.rmtree(manager_dir)
+        except (FileNotFoundError, NotADirectoryError, PermissionError, OSError) as e:
+            self.logger.debug(
+                "Failed to cleanup Windsurf manager dir %s: %s",
+                manager_dir,
+                e,
+            )
 
     def _get_language_server_binary(self) -> Optional[Path]:
         """Resolve the Windsurf local language server binary from the extension bundle."""

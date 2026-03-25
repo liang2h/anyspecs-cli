@@ -434,6 +434,11 @@ def test_fetch_workspace_trajectories_returns_timeout_error_instead_of_raising(
         "_wait_for_language_server_port",
         lambda self, process, manager_dir, timeout_seconds: None,
     )
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_cleanup_manager_dir",
+        lambda self, manager_dir: None,
+    )
 
     decoded, errors = extractor._fetch_workspace_trajectories(
         workspace_id=WORKSPACE_ID,
@@ -460,3 +465,107 @@ def test_read_language_server_stderr_preview_returns_placeholder_when_log_missin
         preview = extractor._read_language_server_stderr_preview(Path(temp_dir))
 
     assert preview == "<missing>"
+
+
+def test_cleanup_manager_dir_ignores_windows_style_oserror(tmp_path, monkeypatch, caplog):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    manager_dir = tmp_path / "manager"
+    manager_dir.mkdir()
+
+    def fake_rmtree(path):
+        raise OSError(267, "目录名称无效。")
+
+    monkeypatch.setattr(shutil, "rmtree", fake_rmtree)
+
+    with caplog.at_level("DEBUG", logger="anyspecs.extractors.windsurf"):
+        extractor._cleanup_manager_dir(manager_dir)
+
+    assert "Failed to cleanup Windsurf manager dir" in caplog.text
+
+
+def test_cleanup_manager_dir_ignores_permission_error(tmp_path, monkeypatch):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    manager_dir = tmp_path / "manager"
+    manager_dir.mkdir()
+
+    monkeypatch.setattr(
+        shutil,
+        "rmtree",
+        lambda path: (_ for _ in ()).throw(PermissionError("busy")),
+    )
+
+    extractor._cleanup_manager_dir(manager_dir)
+
+
+def test_cleanup_manager_dir_removes_existing_directory(tmp_path, monkeypatch):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    manager_dir = tmp_path / "manager"
+    (manager_dir / "nested").mkdir(parents=True)
+    (manager_dir / "nested" / "file.txt").write_text("fixture", encoding="utf-8")
+
+    extractor._cleanup_manager_dir(manager_dir)
+
+    assert not manager_dir.exists()
+
+
+def test_fetch_workspace_trajectories_still_returns_timeout_when_cleanup_fails(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    extractor.extension_bundle_path = Path(__file__)
+    manager_dir = tmp_path / "fixed-manager-dir"
+    manager_dir.mkdir()
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(tempfile, "mkdtemp", lambda prefix: str(manager_dir))
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: DummyProcess())
+    monkeypatch.setattr(WindsurfExtractor, "_reserve_local_port", lambda self: 43120)
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_wait_for_language_server_port",
+        lambda self, process, manager_dir, timeout_seconds: None,
+    )
+    monkeypatch.setattr(
+        shutil,
+        "rmtree",
+        lambda path: (_ for _ in ()).throw(OSError(267, "目录名称无效。")),
+    )
+
+    decoded, errors = extractor._fetch_workspace_trajectories(
+        workspace_id=WORKSPACE_ID,
+        session_ids=[ACTIVE_SESSION_ID],
+        binary_path=Path(__file__),
+        node_binary="node",
+    )
+
+    assert decoded == {}
+    assert ACTIVE_SESSION_ID in errors
+    assert "Timed out waiting for Windsurf language server" in errors[ACTIVE_SESSION_ID]
