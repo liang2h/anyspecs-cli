@@ -2,6 +2,7 @@ import copy
 import json
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -323,3 +324,139 @@ def test_run_node_json_logs_stdout_preview_for_invalid_json(
     assert result == {}
     assert "Invalid JSON preview returned invalid JSON" in caplog.text
     assert "not-json-中文" in caplog.text
+
+
+def test_debug_manager_dir_contents_handles_windows_style_transient_oserror(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    class BrokenManagerDir:
+        def exists(self):
+            return True
+
+        def rglob(self, pattern):
+            raise OSError(267, "目录名称无效。")
+
+    result = extractor._debug_manager_dir_contents(BrokenManagerDir())
+
+    assert "unavailable" in result
+    assert "267" in result
+
+
+def test_find_language_server_port_file_returns_none_when_manager_dir_is_racy(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    class BrokenManagerDir:
+        def exists(self):
+            return True
+
+        def iterdir(self):
+            raise OSError(267, "目录名称无效。")
+
+    assert extractor._find_language_server_port_file(BrokenManagerDir()) is None
+
+
+def test_wait_for_language_server_port_returns_none_when_debug_scan_hits_oserror(
+    tmp_path, monkeypatch, caplog
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    class BrokenManagerDir:
+        def exists(self):
+            return True
+
+        def iterdir(self):
+            return iter(())
+
+        def rglob(self, pattern):
+            raise OSError(267, "目录名称无效。")
+
+        def __truediv__(self, name):
+            return self
+
+    class ExitedProcess:
+        def poll(self):
+            return 1
+
+    with caplog.at_level("DEBUG", logger="anyspecs.extractors.windsurf"):
+        result = extractor._wait_for_language_server_port(
+            process=ExitedProcess(),
+            manager_dir=BrokenManagerDir(),
+            timeout_seconds=1,
+        )
+
+    assert result is None
+    assert "did not publish a port" in caplog.text
+
+
+def test_fetch_workspace_trajectories_returns_timeout_error_instead_of_raising(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+    extractor.extension_bundle_path = Path(__file__)
+
+    class DummyProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: DummyProcess())
+    monkeypatch.setattr(WindsurfExtractor, "_reserve_local_port", lambda self: 43120)
+    monkeypatch.setattr(
+        WindsurfExtractor,
+        "_wait_for_language_server_port",
+        lambda self, process, manager_dir, timeout_seconds: None,
+    )
+
+    decoded, errors = extractor._fetch_workspace_trajectories(
+        workspace_id=WORKSPACE_ID,
+        session_ids=[ACTIVE_SESSION_ID],
+        binary_path=Path(__file__),
+        node_binary="node",
+    )
+
+    assert decoded == {}
+    assert ACTIVE_SESSION_ID in errors
+    assert "Timed out waiting for Windsurf language server" in errors[ACTIVE_SESSION_ID]
+
+
+def test_read_language_server_stderr_preview_returns_placeholder_when_log_missing(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        preview = extractor._read_language_server_stderr_preview(Path(temp_dir))
+
+    assert preview == "<missing>"

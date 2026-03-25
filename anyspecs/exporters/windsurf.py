@@ -675,35 +675,120 @@ class WindsurfExtractor(BaseExtractor):
 
             time.sleep(0.25)
 
+        process_exit_code = process.poll()
+        stderr_preview = self._read_language_server_stderr_preview(manager_dir)
         self.logger.debug(
-            "Windsurf language server manager dir contents before timeout/exit: %s",
+            "Windsurf language server did not publish a port "
+            "(exit_code=%s, manager_dir=%s, stderr=%s)",
+            process_exit_code,
             self._debug_manager_dir_contents(manager_dir),
+            stderr_preview,
         )
         return None
 
     def _find_language_server_port_file(self, manager_dir: Path) -> Optional[Path]:
         """Return the manager port marker file when it appears."""
-        if not manager_dir.exists():
+        try:
+            if not manager_dir.exists():
+                return None
+        except OSError:
             return None
 
-        candidates = [
-            path
-            for path in manager_dir.iterdir()
-            if path.is_file() and path.name.isdigit()
-        ]
+        try:
+            entries = list(manager_dir.iterdir())
+        except (FileNotFoundError, NotADirectoryError, OSError):
+            return None
+
+        candidates = []
+        for path in entries:
+            try:
+                if path.is_file() and path.name.isdigit():
+                    candidates.append(path)
+            except (FileNotFoundError, NotADirectoryError, OSError):
+                continue
+
         if not candidates:
             return None
 
-        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        try:
+            candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        except (FileNotFoundError, NotADirectoryError, OSError):
+            stable_candidates = []
+            for path in candidates:
+                try:
+                    stable_candidates.append((path.stat().st_mtime, path))
+                except (FileNotFoundError, NotADirectoryError, OSError):
+                    continue
+            if not stable_candidates:
+                return None
+            stable_candidates.sort(key=lambda item: item[0], reverse=True)
+            return stable_candidates[0][1]
+
         return candidates[0]
 
     def _debug_manager_dir_contents(self, manager_dir: Path) -> str:
         """Build a compact debug string for the Windsurf manager directory."""
-        if not manager_dir.exists():
+        try:
+            if not manager_dir.exists():
+                return "<missing>"
+        except OSError as e:
+            return f"<unavailable: {e}>"
+
+        paths: List[str] = []
+        try:
+            for path in manager_dir.rglob("*"):
+                try:
+                    paths.append(str(path.relative_to(manager_dir)))
+                except (FileNotFoundError, NotADirectoryError, OSError):
+                    continue
+                if len(paths) >= 20:
+                    break
+        except (FileNotFoundError, NotADirectoryError, OSError) as e:
+            if not paths:
+                return f"<unavailable: {e}>"
+
+        return ", ".join(sorted(paths)) if paths else "<empty>"
+
+    def _read_language_server_stderr_preview(
+        self,
+        manager_dir: Path,
+        max_chars: int = 400,
+    ) -> str:
+        """Read a short preview of the latest language server stderr log."""
+        server_outputs_dir = manager_dir / "server_outputs"
+        try:
+            if not server_outputs_dir.exists():
+                return "<missing>"
+        except OSError as e:
+            return f"<unavailable: {e}>"
+
+        try:
+            candidates = sorted(
+                [
+                    path
+                    for path in server_outputs_dir.iterdir()
+                    if path.is_file() and path.name.startswith("language_server_stderr")
+                ],
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        except (FileNotFoundError, NotADirectoryError, OSError) as e:
+            return f"<unavailable: {e}>"
+
+        if not candidates:
             return "<missing>"
 
-        paths = sorted(str(path.relative_to(manager_dir)) for path in manager_dir.rglob("*"))
-        return ", ".join(paths[:20])
+        latest = candidates[0]
+        try:
+            preview = latest.read_text(encoding="utf-8", errors="replace").strip()
+        except (FileNotFoundError, NotADirectoryError, OSError) as e:
+            return f"<unavailable: {e}>"
+
+        if not preview:
+            return "<empty>"
+
+        preview = preview.replace("\n", "\\n")
+        return preview[:max_chars]
 
     def _stop_language_server(self, process: subprocess.Popen) -> None:
         """Terminate the local Windsurf language server process."""
