@@ -1,6 +1,7 @@
 import copy
 import json
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -228,3 +229,97 @@ def test_path_resolution_prefers_env_then_config_then_auto(tmp_path, monkeypatch
         assert bundle_source == "config:sources.windsurf.extension_bundle_path"
     finally:
         runtime_config._config = original_config
+
+
+def test_run_node_json_decodes_utf8_bytes_without_platform_default_encoding(
+    tmp_path, monkeypatch
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    def fake_run(*args, **kwargs):
+        assert isinstance(kwargs["input"], bytes)
+        assert kwargs["input"].decode("utf-8")
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout='{"message":"中文输出"}'.encode("utf-8"),
+            stderr="".encode("utf-8"),
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = extractor._run_node_json(
+        node_binary="node",
+        script="console.log('ok')",
+        payload={"hello": "world"},
+        error_context="Windows bytes decode",
+    )
+
+    assert result == {"message": "中文输出"}
+
+
+def test_run_node_json_handles_non_utf8_stderr_bytes_without_crashing(
+    tmp_path, monkeypatch, caplog
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=1,
+            stdout=b"",
+            stderr=b"\x8e\x8fnode helper failed",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with caplog.at_level("DEBUG", logger="anyspecs.extractors.windsurf"):
+        result = extractor._run_node_json(
+            node_binary="node",
+            script="console.error('boom')",
+            payload={"hello": "world"},
+            error_context="Windows stderr decode",
+        )
+
+    assert result == {}
+    assert "Windows stderr decode failed" in caplog.text
+
+
+def test_run_node_json_logs_stdout_preview_for_invalid_json(
+    tmp_path, monkeypatch, caplog
+):
+    extractor = make_extractor(
+        copy_fixture_storage(tmp_path),
+        tmp_path / "workspace" / "demo-learning-platform",
+        monkeypatch,
+    )
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="not-json-中文".encode("utf-8"),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with caplog.at_level("DEBUG", logger="anyspecs.extractors.windsurf"):
+        result = extractor._run_node_json(
+            node_binary="node",
+            script="console.log('boom')",
+            payload={"hello": "world"},
+            error_context="Invalid JSON preview",
+        )
+
+    assert result == {}
+    assert "Invalid JSON preview returned invalid JSON" in caplog.text
+    assert "not-json-中文" in caplog.text

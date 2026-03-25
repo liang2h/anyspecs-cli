@@ -764,24 +764,40 @@ class WindsurfExtractor(BaseExtractor):
         try:
             result = subprocess.run(
                 [node_binary, "-e", script],
-                input=json.dumps(payload),
+                input=json.dumps(payload).encode("utf-8"),
                 capture_output=True,
-                text=True,
                 check=False,
             )
         except Exception as e:
             self.logger.debug("%s failed to start: %s", error_context, e)
             return {}
 
+        stdout = self._decode_subprocess_output(result.stdout)
+        stderr = self._decode_subprocess_output(result.stderr)
+
         if result.returncode != 0:
-            self.logger.debug("%s failed: %s", error_context, result.stderr.strip())
+            self.logger.debug("%s failed: %s", error_context, stderr.strip())
             return {}
 
         try:
-            return json.loads(result.stdout)
+            return json.loads(stdout)
         except Exception as e:
-            self.logger.debug("%s returned invalid JSON: %s", error_context, e)
+            stdout_preview = stdout[:200].replace("\n", "\\n")
+            self.logger.debug(
+                "%s returned invalid JSON: %s; stdout=%r",
+                error_context,
+                e,
+                stdout_preview,
+            )
             return {}
+
+    def _decode_subprocess_output(self, value: Any) -> str:
+        """Decode subprocess output without relying on platform default encodings."""
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return str(value)
 
     def _load_cached_state(self) -> Dict[str, Any]:
         """Load decoded Windsurf cache state from either a fixture or local storage."""
