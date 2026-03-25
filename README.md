@@ -204,7 +204,7 @@ anyspecs --help
 - Claude Code: from Claude Code's JSONL history files
 - Augment Code: from VSCode's history databases
 - Codex cli: from Codex cli's history files
-- OpenCode: from OpenCode's local raw storage files
+- OpenCode: from OpenCode's local SQLite database (`opencode.db`) with fallback to legacy raw storage files
 - Windsurf: from Windsurf's local workspace metadata and readable session storage
 - Kiro Records: from summary directory of Kiro
 

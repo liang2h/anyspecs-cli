@@ -211,8 +211,9 @@ OSS 上传规则：
 
 ### OpenCode
 
-从 OpenCode 的本地原始存储目录中提取聊天记录，包括：
-- session / message / part 三层结构
+从 OpenCode 的本地 SQLite 数据库（`opencode.db`）中提取聊天记录，旧版本会回退到原始存储目录，包括：
+- SQLite 中的 session / message / part 表
+- 旧版 session / message / part 三层结构
 - 用户消息、AI 回复
 - 工具调用和工具输出
 - 文件引用与 patch 元数据
