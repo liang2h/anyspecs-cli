@@ -6,7 +6,9 @@ import os
 import platform
 import pathlib
 import re
-from typing import Optional
+from typing import List, Optional, Tuple
+
+from ..config.runtime import config
 
 
 def get_project_name() -> str:
@@ -75,24 +77,157 @@ def get_cursor_root() -> pathlib.Path:
         raise RuntimeError(f"Unsupported OS: {system}")
 
 
-def get_windsurf_app_root() -> pathlib.Path:
+def get_windsurf_app_root() -> Optional[pathlib.Path]:
     """Get the Windsurf application data root directory."""
+    resolved_path, _ = resolve_windsurf_app_root()
+    return resolved_path
+
+
+def get_windsurf_storage_root() -> Optional[pathlib.Path]:
+    """Get the Windsurf local Codeium storage root directory."""
+    resolved_path, _ = resolve_windsurf_storage_root()
+    return resolved_path
+
+
+def get_windsurf_extension_bundle_path() -> Optional[pathlib.Path]:
+    """Get the Windsurf extension bundle path when it exists."""
+    resolved_path, _ = resolve_windsurf_extension_bundle_path()
+    return resolved_path
+
+
+def resolve_windsurf_app_root() -> Tuple[Optional[pathlib.Path], str]:
+    """Resolve the Windsurf application root with env/config/platform precedence."""
+    return _resolve_existing_path(
+        env_var="ANYSPECS_WINDSURF_APP_ROOT",
+        config_key="sources.windsurf.app_root",
+        auto_candidates=_get_windsurf_app_root_candidates(),
+        default_source="platform_default",
+    )
+
+
+def resolve_windsurf_storage_root() -> Tuple[Optional[pathlib.Path], str]:
+    """Resolve the Windsurf Codeium storage root with env/config/platform precedence."""
+    return _resolve_existing_path(
+        env_var="ANYSPECS_WINDSURF_STORAGE_ROOT",
+        config_key="sources.windsurf.storage_root",
+        auto_candidates=[pathlib.Path.home() / ".codeium" / "windsurf"],
+        default_source="default_storage_root",
+    )
+
+
+def resolve_windsurf_extension_bundle_path() -> Tuple[Optional[pathlib.Path], str]:
+    """Resolve the Windsurf extension bundle with env/config/platform precedence."""
+    return _resolve_existing_path(
+        env_var="ANYSPECS_WINDSURF_EXTENSION_BUNDLE",
+        config_key="sources.windsurf.extension_bundle_path",
+        auto_candidates=_get_windsurf_extension_bundle_candidates(),
+        default_source="platform_auto",
+    )
+
+
+def _resolve_existing_path(
+    env_var: str,
+    config_key: str,
+    auto_candidates: List[pathlib.Path],
+    default_source: str,
+) -> Tuple[Optional[pathlib.Path], str]:
+    """Resolve the first existing path from env, config, or platform defaults."""
+    env_value = _existing_path_from_text(os.getenv(env_var))
+    if env_value is not None:
+        return env_value, f"env:{env_var}"
+
+    config_value = _existing_path_from_text(config.get(config_key))
+    if config_value is not None:
+        return config_value, f"config:{config_key}"
+
+    for candidate in auto_candidates:
+        existing_candidate = _existing_path(candidate)
+        if existing_candidate is not None:
+            return existing_candidate, default_source
+
+    return None, "unresolved"
+
+
+def _existing_path_from_text(value: Optional[str]) -> Optional[pathlib.Path]:
+    """Expand and return a path only when it already exists."""
+    if not value:
+        return None
+    return _existing_path(pathlib.Path(str(value)).expanduser())
+
+
+def _existing_path(path: pathlib.Path) -> Optional[pathlib.Path]:
+    """Return the resolved path when it exists on disk."""
+    try:
+        expanded = path.expanduser()
+        if not expanded.exists():
+            return None
+        return expanded.resolve()
+    except Exception:
+        return None
+
+
+def _get_windsurf_app_root_candidates() -> List[pathlib.Path]:
+    """Return platform-specific Windsurf app root candidates."""
     home = pathlib.Path.home()
     system = platform.system()
 
     if system == "Darwin":
-        return home / "Library" / "Application Support" / "Windsurf"
-    elif system == "Windows":
-        return home / "AppData" / "Roaming" / "Windsurf"
-    elif system == "Linux":
-        return home / ".config" / "Windsurf"
-    else:
-        raise RuntimeError(f"Unsupported OS: {system}")
+        return [home / "Library" / "Application Support" / "Windsurf"]
+    if system == "Windows":
+        return [home / "AppData" / "Roaming" / "Windsurf"]
+    if system == "Linux":
+        return [home / ".config" / "Windsurf"]
+    return []
 
 
-def get_windsurf_storage_root() -> pathlib.Path:
-    """Get the Windsurf local Codeium storage root directory."""
-    return pathlib.Path.home() / ".codeium" / "windsurf"
+def _get_windsurf_extension_bundle_candidates() -> List[pathlib.Path]:
+    """Return platform-specific Windsurf extension bundle candidates."""
+    home = pathlib.Path.home()
+    system = platform.system()
+
+    if system == "Darwin":
+        return [
+            pathlib.Path("/Applications/Windsurf.app/Contents/Resources/app/extensions/windsurf/dist/extension.js"),
+            home / "Applications" / "Windsurf.app" / "Contents" / "Resources" / "app" / "extensions" / "windsurf" / "dist" / "extension.js",
+        ]
+
+    if system == "Windows":
+        candidates: List[pathlib.Path] = []
+        local_app_data = os.getenv("LOCALAPPDATA")
+        program_files = os.getenv("ProgramFiles")
+        if local_app_data:
+            candidates.append(
+                pathlib.Path(local_app_data)
+                / "Programs"
+                / "Windsurf"
+                / "resources"
+                / "app"
+                / "extensions"
+                / "windsurf"
+                / "dist"
+                / "extension.js"
+            )
+        if program_files:
+            candidates.append(
+                pathlib.Path(program_files)
+                / "Windsurf"
+                / "resources"
+                / "app"
+                / "extensions"
+                / "windsurf"
+                / "dist"
+                / "extension.js"
+            )
+        return candidates
+
+    if system == "Linux":
+        return [
+            pathlib.Path("/opt/Windsurf/resources/app/extensions/windsurf/dist/extension.js"),
+            pathlib.Path("/usr/share/windsurf/resources/app/extensions/windsurf/dist/extension.js"),
+            home / ".local" / "share" / "Windsurf" / "resources" / "app" / "extensions" / "windsurf" / "dist" / "extension.js",
+        ]
+
+    return []
 
 
 def get_claude_history_path(project_path: Optional[str] = None) -> pathlib.Path:

@@ -1,0 +1,55 @@
+{
+  "trajectory": {
+    "trajectoryId": "cb3ab731-0907-4ed1-a779-55d0e837a3c8",
+    "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+    "steps": [
+      {
+        "type": "CORTEX_STEP_TYPE_USER_INPUT",
+        "status": "CORTEX_STEP_STATUS_DONE",
+        "metadata": {
+          "createdAt": "2026-03-24T09:18:10.040000Z",
+          "source": "CORTEX_STEP_SOURCE_USER_EXPLICIT"
+        },
+        "userInput": {
+          "userResponse": "梳理一下核心数据模型",
+          "items": [
+            {
+              "text": "梳理一下核心数据模型"
+            }
+          ],
+          "activeUserState": {}
+        }
+      },
+      {
+        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+        "status": "CORTEX_STEP_STATUS_DONE",
+        "metadata": {
+          "createdAt": "2026-03-24T09:18:12.300000Z",
+          "viewableAt": "2026-03-24T09:18:13.120000Z",
+          "completedAt": "2026-03-24T09:18:13.980000Z",
+          "source": "CORTEX_STEP_SOURCE_MODEL"
+        },
+        "plannerResponse": {
+          "response": "\n\n我先梳理关键领域对象，再整理它们之间的关系。\n",
+          "modifiedResponse": "我先梳理关键领域对象，再整理它们之间的关系。"
+        }
+      },
+      {
+        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+        "status": "CORTEX_STEP_STATUS_DONE",
+        "metadata": {
+          "createdAt": "2026-03-24T09:18:20.020000Z",
+          "viewableAt": "2026-03-24T09:18:21.560000Z",
+          "completedAt": "2026-03-24T09:18:43.120000Z",
+          "source": "CORTEX_STEP_SOURCE_MODEL"
+        },
+        "plannerResponse": {
+          "response": "\n\n# 核心数据模型\n\n- **Course**: 课程主体，承载名称、阶段、状态等核心属性。\n- **Lesson**: 课程下的教学单元，关联视频、练习和学习目标。\n- **LearningPlan**: 学习计划，负责串联课程、班级和学习周期。\n- **StudyTask**: 学习任务，记录学员需要完成的具体动作与截止时间。\n- **ProgressSnapshot**: 进度快照，用于沉淀学习完成率、错题数和跟进状态。\n",
+          "modifiedResponse": "# 核心数据模型\n\n- **Course**: 课程主体，承载名称、阶段、状态等核心属性。\n- **Lesson**: 课程下的教学单元，关联视频、练习和学习目标。\n- **LearningPlan**: 学习计划，负责串联课程、班级和学习周期。\n- **StudyTask**: 学习任务，记录学员需要完成的具体动作与截止时间。\n- **ProgressSnapshot**: 进度快照，用于沉淀学习完成率、错题数和跟进状态。"
+        }
+      }
+    ]
+  },
+  "status": "CASCADE_RUN_STATUS_IDLE",
+  "numTotalSteps": 3
+}

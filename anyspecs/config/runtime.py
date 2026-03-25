@@ -43,7 +43,10 @@ class Config:
                     'enabled': True
                 },
                 'windsurf': {
-                    'enabled': True
+                    'enabled': True,
+                    'app_root': None,
+                    'storage_root': None,
+                    'extension_bundle_path': None
                 }
             },
             'server': {

@@ -402,6 +402,13 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         if args.session_id:
             filtered_chats = [c for c in filtered_chats if c.get('session_id', '').startswith(args.session_id)]
             if not filtered_chats:
+                if args.source == 'windsurf':
+                    windsurf_extractor = self.extractors.get('windsurf')
+                    if windsurf_extractor and hasattr(windsurf_extractor, 'get_session_export_error'):
+                        error_message = windsurf_extractor.get_session_export_error(args.session_id)
+                        if error_message:
+                            print(f"❌ {error_message}")
+                            return []
                 print(f"❌ No chat records found with session ID starting with '{args.session_id}'")
                 return []
         

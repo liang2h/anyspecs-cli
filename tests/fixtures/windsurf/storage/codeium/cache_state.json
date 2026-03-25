@@ -24,6 +24,28 @@
           "lastUserInputTime": "2026-03-24T10:24:47.633874Z",
           "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
           "lastGeneratorModelUid": "MODEL_SWE_1_5_SLOW"
+        },
+        "f32adc43-5d83-41e5-ab27-736a817cf70d": {
+          "summary": "Data Model Review",
+          "stepCount": 11,
+          "lastModifiedTime": "2026-03-24T09:18:43.120000Z",
+          "trajectoryId": "cb3ab731-0907-4ed1-a779-55d0e837a3c8",
+          "status": "CASCADE_RUN_STATUS_IDLE",
+          "createdTime": "2026-03-24T09:18:10.015000Z",
+          "workspaces": [
+            {
+              "workspaceFolderAbsoluteUri": "file:///Users/redacted/work/sample/code/demo-learning-platform",
+              "gitRootAbsoluteUri": "file:///Users/redacted/work/sample/code/demo-learning-platform",
+              "repository": {
+                "computedName": "redacted/demo-learning-platform",
+                "gitOriginUrl": "git@redacted.example:demo-learning-platform.git"
+              },
+              "branchName": "master"
+            }
+          ],
+          "lastUserInputTime": "2026-03-24T09:18:10.040000Z",
+          "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+          "lastGeneratorModelUid": "MODEL_SWE_1_5_FAST"
         }
       },
       "active_trajectory": {
