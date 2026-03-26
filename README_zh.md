@@ -13,11 +13,11 @@
 
 </div>
 
-AnySpecs CLI 是一个统一的命令行工具，用于从多个 AI 助手导出聊天记录。它目前支持 **Cursor AI**、**Claude Code**、**Augment Code**、**Codex CLI**、**OpenCode** 和 **Kiro Records**，并支持多种导出格式，包括 Markdown、HTML 和 JSON。
+AnySpecs CLI 是一个统一的命令行工具，用于从多个 AI 助手导出聊天记录。它目前支持 **Cursor AI**、**Claude Code**、**Augment Code**、**Codex CLI**、**OpenCode**、**Windsurf** 和 **Kiro Records**，并支持多种导出格式，包括 Markdown、HTML 和 JSON。
 
 ## ✨ 功能特性
 
-- **多源支持**: 从 Cursor、Claude、Augment、Codex、OpenCode、Kiro 等来源导出（持续增加）。
+- **多源支持**: 从 Cursor、Claude、Augment、Codex、OpenCode、Windsurf、Kiro 等来源导出（持续增加）。
 - **多种导出格式**: 支持 Markdown、HTML 和 JSON。
 - **项目与工作区过滤**: 按项目或当前目录导出聊天会话。
 - **灵活的会话管理**: 列表、筛选和导出特定的聊天会话。
@@ -57,8 +57,8 @@ pip install anyspecs
 # 列出所有来源的当前工作区的聊天会话
 anyspecs list
 
-# 仅列出当前工作区的 Cursor/Claude/Kiro/Augment/Codex/OpenCode 会话
-anyspecs list --source cursor/claude/kiro/augment/codex/opencode/all
+# 仅列出当前工作区的 Cursor/Claude/Kiro/Augment/Codex/OpenCode/Windsurf 会话
+anyspecs list --source cursor/claude/kiro/augment/codex/opencode/windsurf/all
 
 # 显示详细信息
 anyspecs list --verbose
@@ -80,7 +80,7 @@ anyspecs export --now
 anyspecs export --session-id abc123 --format json
 
 # 导出指定来源（默认 markdown）并自定义输出目录
-anyspecs export --source claude/cursor/kiro/augment/codex/opencode --format markdown --output ./exports
+anyspecs export --source claude/cursor/kiro/augment/codex/opencode/windsurf --format markdown --output ./exports
 
 # 导出文件默认写入 .anyspecs/，文件名包含完整 session_id，并附带 sidecar 元数据
 # 例如：
@@ -211,11 +211,20 @@ OSS 上传规则：
 
 ### OpenCode
 
-从 OpenCode 的本地原始存储目录中提取聊天记录，包括：
-- session / message / part 三层结构
+从 OpenCode 的本地 SQLite 数据库（`opencode.db`）中提取聊天记录，旧版本会回退到原始存储目录，包括：
+- SQLite 中的 session / message / part 表
+- 旧版 session / message / part 三层结构
 - 用户消息、AI 回复
 - 工具调用和工具输出
 - 文件引用与 patch 元数据
+
+### Windsurf
+
+从 Windsurf 的本地工作区元数据与可读会话存储中提取聊天记录，包括：
+- 工作区路径与项目上下文
+- 用户消息、AI 回复
+- 会话标题与时间戳
+- 导出所需的来源元数据
 
 ## 🤝 贡献
 

@@ -19,6 +19,7 @@ from .exporters.kiro import KiroExtractor
 from .exporters.augment import AugmentExtractor
 from .exporters.codex import CodexExtractor
 from .exporters.opencode import OpenCodeExtractor
+from .exporters.windsurf import WindsurfExtractor
 from .core.formatters import JSONFormatter, MarkdownFormatter, HTMLFormatter
 from . import __version__
 from .utils.uploader import AnySpecsUploadClient
@@ -35,6 +36,7 @@ class AnySpecsCLI:
             'augment': AugmentExtractor(),
             'codex': CodexExtractor(),
             'opencode': OpenCodeExtractor(),
+            'windsurf': WindsurfExtractor(),
         }
         self.formatters = {
             'json': JSONFormatter(),
@@ -43,6 +45,18 @@ class AnySpecsCLI:
             'html': HTMLFormatter()
         }
         self.logger = None
+
+    def _begin_windsurf_command_scope(self) -> None:
+        """Initialize the Windsurf command scope when the extractor supports it."""
+        extractor = self.extractors.get('windsurf')
+        if extractor and hasattr(extractor, 'begin_command_scope'):
+            extractor.begin_command_scope()
+
+    def _close_windsurf_command_scope(self) -> None:
+        """Close the Windsurf command scope when the extractor supports it."""
+        extractor = self.extractors.get('windsurf')
+        if extractor and hasattr(extractor, 'close_command_scope'):
+            extractor.close_command_scope()
     
     def run(self, args: List[str] = None) -> int:
         """Run the CLI with given arguments."""
@@ -88,7 +102,7 @@ class AnySpecsCLI:
             epilog="""
 Examples:
   %(prog)s list                                    # List all chat sessions from all sources
-  %(prog)s list --source cursor                   # List only Cursor sessions(Also works for augment, claude code, kiro, codex and opencode)
+  %(prog)s list --source cursor                   # List only Cursor sessions(Also works for augment, claude code, kiro, codex, opencode and windsurf)
   %(prog)s export --source claude --format json   # Export Claude sessions as json to .anyspecs/ Default is markdown
   %(prog)s export --session-id abc123 --format html --output chat.html # Export a specific session as html to chat.html
   %(prog)s setup kimi                             # Configure Kimi API key and model  
@@ -120,7 +134,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # list command
         list_parser = subparsers.add_parser('list', help='List all chat sessions')
         list_parser.add_argument('--source', '-s', 
-                               choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'all'], 
+                               choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'windsurf', 'all'], 
                                default='all',
                                help='Source to list sessions from (default: all)')
         list_parser.add_argument('--verbose', '-v', action='store_true', help='Display detailed information')
@@ -128,7 +142,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         # export command
         export_parser = subparsers.add_parser('export', help='Export chat sessions')
         export_parser.add_argument('--source', '-s',
-                                 choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'all'],
+                                 choices=['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'windsurf', 'all'],
                                  default='all',
                                  help='Source to export from (default: all)')
         export_parser.add_argument('--format', '-f', 
@@ -229,102 +243,144 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
     
     def _list_command(self, args) -> int:
         """Execute the list command."""
-        print("🔍 Searching for chat records...")
-        
-        # Collect sessions from all requested sources
-        all_sessions = []
-        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode'] if args.source == 'all' else [args.source]
-        self._print_claude_version_notice(sources_to_check)
-        self._print_codex_version_notice(sources_to_check)
-        
-        for source in sources_to_check:
-            extractor = self.extractors[source]
-            try:
-                sessions = extractor.list_sessions()
-                for session in sessions:
-                    session['source'] = source
-                all_sessions.extend(sessions)
-                self.logger.info(f"Found {len(sessions)} sessions from {source}")
-            except Exception as e:
-                self.logger.warning(f"Error extracting from {source}: {e}")
-        
-        if not all_sessions:
-            print("❌ No chat records found")
-            print("💡 Please ensure corresponding IDE is installed and you have used the AI assistants")
-            return 1
-        
-        print(f"✅ Found {len(all_sessions)} chat sessions\n")
-        
-        # Group by project and source
-        projects = {}
-        for session in all_sessions:
-            key = f"{session['project']} ({session['source']})"
-            if key not in projects:
-                projects[key] = []
-            projects[key].append(session)
-        
-        for project_key, project_sessions in projects.items():
-            print(f"📁 {project_key} ({len(project_sessions)} sessions)")
+        self._begin_windsurf_command_scope()
+        try:
+            print("🔍 Searching for chat records...")
             
-            for session in project_sessions[:5]:  # Only show the first 5
-                session_id = session['session_id']
-                msg_count = session['message_count']
-                date_str = session['date']
+            # Collect sessions from all requested sources
+            all_sessions = []
+            sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'windsurf'] if args.source == 'all' else [args.source]
+            self._print_claude_version_notice(sources_to_check)
+            self._print_codex_version_notice(sources_to_check)
+            
+            for source in sources_to_check:
+                extractor = self.extractors[source]
+                try:
+                    sessions = extractor.list_sessions()
+                    for session in sessions:
+                        session['source'] = source
+                    all_sessions.extend(sessions)
+                    self.logger.info(f"Found {len(sessions)} sessions from {source}")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting from {source}: {e}")
+            
+            if not all_sessions:
+                print("❌ No chat records found")
+                print("💡 Please ensure corresponding IDE is installed and you have used the AI assistants")
+                return 1
+            
+            print(f"✅ Found {len(all_sessions)} chat sessions\n")
+            
+            # Group by project and source
+            projects = {}
+            for session in all_sessions:
+                key = f"{session['project']} ({session['source']})"
+                if key not in projects:
+                    projects[key] = []
+                projects[key].append(session)
+            
+            for project_key, project_sessions in projects.items():
+                print(f"📁 {project_key} ({len(project_sessions)} sessions)")
                 
-                print(f"  🆔 {session_id} | 📅 {date_str} | 💬 {msg_count} messages")
-                if args.verbose:
-                    preview = session.get('preview', 'No preview')
-                    print(f"     💭 {preview}")
+                for session in project_sessions[:5]:  # Only show the first 5
+                    session_id = session['session_id']
+                    msg_count = session['message_count']
+                    date_str = session['date']
+                    
+                    print(f"  🆔 {session_id} | 📅 {date_str} | 💬 {msg_count} messages")
+                    if args.verbose:
+                        preview = session.get('preview', 'No preview')
+                        print(f"     💭 {preview}")
+                
+                if len(project_sessions) > 5:
+                    print(f"     ... and {len(project_sessions) - 5} more sessions")
+                print()
             
-            if len(project_sessions) > 5:
-                print(f"     ... and {len(project_sessions) - 5} more sessions")
-            print()
-        
-        return 0
+            return 0
+        finally:
+            self._close_windsurf_command_scope()
     
     def _export_command(self, args) -> int:
         """Execute the export command."""
-        print("🔍 Searching for chat records...")
-        
-        # Collect chats from all requested sources
-        all_chats = []
-        sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode'] if args.source == 'all' else [args.source]
-        self._print_claude_version_notice(sources_to_check)
-        self._print_codex_version_notice(sources_to_check)
-        
-        for source in sources_to_check:
-            extractor = self.extractors[source]
-            try:
-                chats = extractor.extract_chats()
-                # Format chats for export
-                for chat in chats:
-                    formatted_chat = extractor.format_chat_for_export(chat)
-                    all_chats.append(formatted_chat)
-                self.logger.info(f"Extracted {len(chats)} chats from {source}")
-            except Exception as e:
-                self.logger.warning(f"Error extracting from {source}: {e}")
-        
-        if not all_chats:
-            print("❌ No chat records found")
-            return 1
-        
-        # Apply filters
-        filtered_chats = self._apply_filters(all_chats, args)
-        
-        if not filtered_chats:
-            print("❌ No chat records match the specified filters")
-            return 1
-        
-        print(f"📊 Preparing to export {len(filtered_chats)} chat sessions (format: {args.format})")
-        
-        # Get formatter
-        formatter = self.formatters[args.format]
-        
-        # Export
-        if len(filtered_chats) == 1:
-            return self._export_single_chat(filtered_chats[0], formatter, args)
-        else:
-            return self._export_multiple_chats(filtered_chats, formatter, args)
+        self._begin_windsurf_command_scope()
+        try:
+            print("🔍 Searching for chat records...")
+            
+            # Collect chats from all requested sources
+            all_chats = []
+            sources_to_check = ['cursor', 'claude', 'kiro', 'augment', 'codex', 'opencode', 'windsurf'] if args.source == 'all' else [args.source]
+            self._print_claude_version_notice(sources_to_check)
+            self._print_codex_version_notice(sources_to_check)
+            
+            for source in sources_to_check:
+                extractor = self.extractors[source]
+                try:
+                    if source == 'windsurf':
+                        chats = self._collect_windsurf_export_chats(args, announce_filters=False)
+                    else:
+                        chats = extractor.extract_chats()
+                    # Format chats for export
+                    for chat in chats:
+                        formatted_chat = extractor.format_chat_for_export(chat)
+                        all_chats.append(formatted_chat)
+                    self.logger.info(f"Extracted {len(chats)} chats from {source}")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting from {source}: {e}")
+            
+            if not all_chats:
+                if args.source == "windsurf" and args.session_id:
+                    windsurf_extractor = self.extractors.get("windsurf")
+                    if windsurf_extractor and hasattr(windsurf_extractor, "get_session_export_error"):
+                        error_message = windsurf_extractor.get_session_export_error(args.session_id)
+                        if error_message:
+                            print(f"❌ {error_message}")
+                            return 1
+                print("❌ No chat records found")
+                return 1
+            
+            # Apply filters
+            filtered_chats = self._apply_filters(all_chats, args)
+            
+            if not filtered_chats:
+                print("❌ No chat records match the specified filters")
+                return 1
+            
+            print(f"📊 Preparing to export {len(filtered_chats)} chat sessions (format: {args.format})")
+            
+            # Get formatter
+            formatter = self.formatters[args.format]
+            
+            # Export
+            if len(filtered_chats) == 1:
+                return self._export_single_chat(filtered_chats[0], formatter, args)
+            else:
+                return self._export_multiple_chats(filtered_chats, formatter, args)
+        finally:
+            self._close_windsurf_command_scope()
+
+    def _collect_windsurf_export_chats(self, args, announce_filters: bool) -> List[Dict[str, Any]]:
+        """Collect only the Windsurf chats that survive lightweight index filtering."""
+        extractor = self.extractors["windsurf"]
+        if not hasattr(extractor, "get_index_context") or not hasattr(extractor, "build_filter_candidates"):
+            return extractor.extract_chats()
+
+        index_context = extractor.get_index_context()
+        index_candidates = extractor.build_filter_candidates(index_context=index_context)
+        filtered_candidates = self._apply_filters(
+            index_candidates,
+            args,
+            announce=announce_filters,
+        )
+        if not filtered_candidates:
+            return []
+
+        session_ids = [candidate["session_id"] for candidate in filtered_candidates]
+        if hasattr(extractor, "extract_chats_for_export"):
+            return extractor.extract_chats_for_export(
+                session_ids=session_ids,
+                index_context=index_context,
+            )
+        return extractor.extract_chats()
 
     def _print_codex_version_notice(self, sources_to_check: List[str]) -> None:
         """Print supported and detected Codex versions when Codex is involved."""
@@ -392,7 +448,7 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
 
         print()
     
-    def _apply_filters(self, chats: List[Dict[str, Any]], args) -> List[Dict[str, Any]]:
+    def _apply_filters(self, chats: List[Dict[str, Any]], args, announce: bool = True) -> List[Dict[str, Any]]:
         """Apply filters to the chat list."""
         filtered_chats = chats
         
@@ -400,7 +456,15 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
         if args.session_id:
             filtered_chats = [c for c in filtered_chats if c.get('session_id', '').startswith(args.session_id)]
             if not filtered_chats:
-                print(f"❌ No chat records found with session ID starting with '{args.session_id}'")
+                if announce and args.source == 'windsurf':
+                    windsurf_extractor = self.extractors.get('windsurf')
+                    if windsurf_extractor and hasattr(windsurf_extractor, 'get_session_export_error'):
+                        error_message = windsurf_extractor.get_session_export_error(args.session_id)
+                        if error_message:
+                            print(f"❌ {error_message}")
+                            return []
+                if announce:
+                    print(f"❌ No chat records found with session ID starting with '{args.session_id}'")
                 return []
         
         # Project filtering logic
@@ -409,22 +473,27 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
             filtered_chats = [c for c in filtered_chats 
                              if args.project.lower() in c.get('project', {}).get('name', '').lower()]
             if not filtered_chats:
-                print(f"❌ No chat records found with project name containing '{args.project}'")
+                if announce:
+                    print(f"❌ No chat records found with project name containing '{args.project}'")
                 return []
-            print(f"📋 Filtering by specified project: {args.project}")
+            if announce:
+                print(f"📋 Filtering by specified project: {args.project}")
         elif not args.all_projects:
             # Default to only exporting sessions for the current project
             current_project = get_project_name()
             filtered_chats = [c for c in filtered_chats 
                              if current_project.lower() in c.get('project', {}).get('name', '').lower()]
             if not filtered_chats:
-                print(f"❌ No chat records found for current project '{current_project}'")
-                print(f"💡 Use --all-projects to export all projects' sessions, or use --project to specify another project")
+                if announce:
+                    print(f"❌ No chat records found for current project '{current_project}'")
+                    print(f"💡 Use --all-projects to export all projects' sessions, or use --project to specify another project")
                 return []
-            print(f"📋 Defaulting to current project: {current_project}")
+            if announce:
+                print(f"📋 Defaulting to current project: {current_project}")
         else:
             # User explicitly requested to export all projects
-            print("📋 Exporting all projects' sessions")
+            if announce:
+                print("📋 Exporting all projects' sessions")
 
         # Today's sessions only
         if getattr(args, 'now', False):
@@ -434,9 +503,11 @@ Note: After first-time setup, API keys and models are auto-saved to .env file an
                 if self._chat_matches_local_date(chat, today)
             ]
             if not filtered_chats:
-                print("❌ No chat records found for today")
+                if announce:
+                    print("❌ No chat records found for today")
                 return []
-            print(f"📅 Filtering to today's sessions: {today.isoformat()}")
+            if announce:
+                print(f"📅 Filtering to today's sessions: {today.isoformat()}")
         
         # Limit
         if args.limit:

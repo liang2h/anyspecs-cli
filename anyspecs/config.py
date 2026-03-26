@@ -36,6 +36,12 @@ class Config:
                 },
                 'claude': {
                     'enabled': True
+                },
+                'windsurf': {
+                    'enabled': True,
+                    'app_root': None,
+                    'storage_root': None,
+                    'extension_bundle_path': None
                 }
             },
             'server': {

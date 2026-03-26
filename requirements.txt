@@ -3,6 +3,7 @@ requests>=2.25.0     # HTTP requests for upload functionality
 python-dateutil>=2.8.0  # Date processing
 pathlib2>=2.3.0
 oss2>=2.19.1         # Alibaba Cloud OSS SDK for direct OSS uploads
+protobuf>=5.0.0     # Protobuf support for local Windsurf session decoding
 
 # Optional dependencies for enhanced features
 # rich>=13.0.0       # Beautiful terminal output (optional)
