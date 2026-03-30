@@ -772,23 +772,56 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     }
 
     first = cli._export_multiple_chats([chat], formatter, args)
+    export_file = tmp_path / "codex-chat-demo-app-session-12345678.md"
+    first_content = export_file.read_text(encoding="utf-8")
     second = cli._export_multiple_chats([chat], formatter, args)
+    second_content = export_file.read_text(encoding="utf-8")
 
     assert first == 0
     assert second == 0
 
-    export_file = tmp_path / "codex-chat-demo-app-session-12345678.md"
     metadata_file = tmp_path / "codex-chat-demo-app-session-12345678.md.meta.json"
     assert export_file.exists()
     assert metadata_file.exists()
 
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+    assert "Exported from" not in first_content
+    assert "Exported from" not in second_content
+    assert first_content == second_content
     assert metadata["source"] == "codex"
     assert metadata["session_id"] == "session-12345678"
     assert metadata["format"] == "markdown"
     assert metadata["dedupe_key"] == "codex:session-12345678:markdown"
     assert metadata["chat_date"] == "2026/03/19"
     assert len(list(tmp_path.glob("*.md"))) == 1
+
+
+def test_export_html_omits_dynamic_export_time_footer(tmp_path):
+    cli = AnySpecsCLI()
+    formatter = cli.formatters["html"]
+    args = type("Args", (), {"output": tmp_path})()
+    chat = {
+        "project": {"name": "demo-app", "rootPath": "/tmp/demo-app"},
+        "messages": [{"role": "assistant", "content": "hello <world>"}],
+        "date": 1773878400,
+        "session_id": "session-html-123",
+        "source": "codex",
+        "metadata": {},
+    }
+
+    result = cli._export_multiple_chats([chat], formatter, args)
+
+    assert result == 0
+
+    export_file = tmp_path / "codex-chat-demo-app-session-html-123.html"
+    assert export_file.exists()
+
+    content = export_file.read_text(encoding="utf-8")
+    assert "Exported from" not in content
+    assert "Chat Export: demo-app" in content
+    assert "Session ID:</span> <span>session-html-123" in content
+    assert "Source:</span> <span>codex" in content
+    assert "hello &lt;world&gt;" in content
 
 
 def test_build_export_filename_stem_sanitizes_invalid_windows_path_characters():
