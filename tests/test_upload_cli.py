@@ -785,9 +785,12 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     assert metadata_file.exists()
 
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-    assert "Exported from" not in first_content
-    assert "Exported from" not in second_content
+    assert "Exported from codex" in first_content
+    assert "Exported from codex on " not in first_content
+    assert "Exported from codex" in second_content
+    assert "Exported from codex on " not in second_content
     assert first_content == second_content
+    assert first_content.rstrip().splitlines()[-1] == "*Exported from codex*"
     assert metadata["source"] == "codex"
     assert metadata["session_id"] == "session-12345678"
     assert metadata["format"] == "markdown"
@@ -796,7 +799,7 @@ def test_export_multiple_writes_stable_filename_and_sidecar(tmp_path):
     assert len(list(tmp_path.glob("*.md"))) == 1
 
 
-def test_export_html_omits_dynamic_export_time_footer(tmp_path):
+def test_export_html_keeps_static_footer_without_dynamic_time(tmp_path):
     cli = AnySpecsCLI()
     formatter = cli.formatters["html"]
     args = type("Args", (), {"output": tmp_path})()
@@ -817,7 +820,8 @@ def test_export_html_omits_dynamic_export_time_footer(tmp_path):
     assert export_file.exists()
 
     content = export_file.read_text(encoding="utf-8")
-    assert "Exported from" not in content
+    assert "Exported from codex" in content
+    assert "Exported from codex on " not in content
     assert "Chat Export: demo-app" in content
     assert "Session ID:</span> <span>session-html-123" in content
     assert "Source:</span> <span>codex" in content

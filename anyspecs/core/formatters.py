@@ -146,6 +146,11 @@ class MarkdownFormatter(BaseFormatter):
                     markdown_lines.append("")
                     markdown_lines.append("---")  # Separator between messages
                     markdown_lines.append("")
+
+            markdown_lines.append("")
+            markdown_lines.append("---")
+            markdown_lines.append("")
+            markdown_lines.append(f"*Exported from {source}*")
             
             return "\n".join(markdown_lines)
             
@@ -282,6 +287,9 @@ class HTMLFormatter(BaseFormatter):
     <div class="messages">
 {messages_html}
     </div>
+    <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 0.9em; color: #666;">
+        <p>Exported from {source}</p>
+    </footer>
 </body>
 </html>"""
             
